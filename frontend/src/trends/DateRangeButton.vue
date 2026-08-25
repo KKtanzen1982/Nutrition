@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const props = defineProps<{ from: string; to: string; max?: string }>()
+defineProps<{ from: string; to: string; max?: string }>()
 const emit = defineEmits<{ 'update:from': [string]; 'update:to': [string] }>()
 
 function onFromInput(e: Event) {
