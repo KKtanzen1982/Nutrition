@@ -1,0 +1,95 @@
+"""食材庫、食材庫存、食譜（含步驟版本控制、營養素）"""
+
+from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, ForeignKey, UniqueConstraint, Text
+from sqlalchemy.orm import relationship
+from datetime import datetime
+
+from database import Base
+
+
+class IngredientLibrary(Base):
+    __tablename__ = "ingredient_library"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ingredient_name = Column(String(255), nullable=False, unique=True)
+    category = Column(String(50), nullable=False)
+    unit = Column(String(20), default="g")
+    calories_per_100g = Column(Float, nullable=True)
+    protein_per_100g = Column(Float, nullable=True)
+    carbs_per_100g = Column(Float, nullable=True)
+    fat_per_100g = Column(Float, nullable=True)
+    fiber_per_100g = Column(Float, nullable=True)
+    preferred_purchase_location = Column(String(255), nullable=True)
+    needs_stock_tracking = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    stock = relationship("IngredientStock", uselist=False, cascade="all, delete-orphan")
+
+
+class IngredientStock(Base):
+    __tablename__ = "ingredient_stock"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ingredient_id = Column(Integer, ForeignKey("ingredient_library.id"), nullable=False, unique=True)
+    current_quantity_g = Column(Float, default=0)
+    min_threshold_g = Column(Float, nullable=True)
+    unit = Column(String(20), default="g")
+    last_purchased_at = Column(Date, nullable=True)
+    notes = Column(Text, nullable=True)
+
+
+class Recipe(Base):
+    __tablename__ = "recipes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    recipe_name = Column(String(255), nullable=False, unique=True)
+    category = Column(String(50), nullable=False)
+    base_weight_g = Column(Integer, nullable=False)
+    cost_level = Column(String(20), nullable=False)
+    is_active = Column(Boolean, default=True)
+    is_vegetarian = Column(Boolean, default=False)
+    allergen_tags = Column(String(255), default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    ingredients = relationship("RecipeIngredient", cascade="all, delete-orphan")
+    steps = relationship("RecipeStep", cascade="all, delete-orphan")
+    nutrition = relationship("RecipeNutrition", uselist=False, cascade="all, delete-orphan")
+
+
+class RecipeIngredient(Base):
+    __tablename__ = "recipe_ingredients"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    recipe_id = Column(Integer, ForeignKey("recipes.id"), nullable=False)
+    ingredient_id = Column(Integer, ForeignKey("ingredient_library.id"), nullable=False)
+    quantity_g = Column(Float, nullable=False)
+    unit = Column(String(20), default="g")
+    notes = Column(Text, nullable=True)
+
+
+class RecipeStep(Base):
+    __tablename__ = "recipe_steps"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    recipe_id = Column(Integer, ForeignKey("recipes.id"), nullable=False)
+    version = Column(Integer, nullable=False)
+    step_number = Column(Integer, nullable=False)
+    step_description = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    is_current = Column(Boolean, default=False)
+
+    __table_args__ = (UniqueConstraint("recipe_id", "version", "step_number", name="uq_recipe_version_step"),)
+
+
+class RecipeNutrition(Base):
+    __tablename__ = "recipe_nutrition"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    recipe_id = Column(Integer, ForeignKey("recipes.id"), nullable=False, unique=True)
+    total_calories_kcal = Column(Float, nullable=True)
+    protein_g = Column(Float, nullable=True)
+    carbs_g = Column(Float, nullable=True)
+    fat_g = Column(Float, nullable=True)
+    fiber_g = Column(Float, nullable=True)
+    calculated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

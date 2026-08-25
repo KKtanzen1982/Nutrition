@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --color-bg: 251 245 234;
+  --color-surface: 255 255 255;
+  --color-ink: 74 53 36;
+  --color-tea: 138 106 78;
+  --color-muted: 201 183 158;
+  --color-accent: 161 61 61;
+  --color-accent-bright: 193 95 95;
+  --color-accent-tint: 244 222 222;
+  --color-on-accent: 255 255 255;
+  --color-alert: 178 58 46;
+}
+
+body {
+  font-family: -apple-system, "Segoe UI", Roboto, "PingFang TC", "Microsoft JhengHei", sans-serif;
+  font-variant-numeric: tabular-nums;
+}

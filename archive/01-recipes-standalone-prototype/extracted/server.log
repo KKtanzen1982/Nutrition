@@ -1,0 +1,99 @@
+INFO:     Started server process [13564]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:54519 - "GET /api/health/block4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54528 - "GET /api/health/block4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54532 - "POST /api/ingredients HTTP/1.1" 201 Created
+INFO:     127.0.0.1:54536 - "POST /api/ingredients HTTP/1.1" 201 Created
+INFO:     127.0.0.1:54538 - "POST /api/ingredients HTTP/1.1" 201 Created
+INFO:     127.0.0.1:54541 - "POST /api/ingredients HTTP/1.1" 201 Created
+INFO:     127.0.0.1:54545 - "GET /api/ingredients/search?query=%E9%9B%9E HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54548 - "GET /api/ingredients?category=%E8%94%AC%E8%8F%9C&page=1&limit=10 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54551 - "PUT /api/ingredients/1/stock HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54554 - "GET /api/ingredients/low-stock HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54557 - "POST /api/purchase-locations HTTP/1.1" 201 Created
+INFO:     127.0.0.1:54562 - "POST /api/purchase-locations HTTP/1.1" 201 Created
+INFO:     127.0.0.1:54565 - "POST /api/purchase-locations HTTP/1.1" 201 Created
+INFO:     127.0.0.1:54568 - "GET /api/purchase-locations HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54571 - "POST /api/recipes HTTP/1.1" 201 Created
+INFO:     127.0.0.1:54574 - "GET /api/recipes/1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54578 - "GET /api/recipes/search?query=%E7%95%AA%E8%8C%84&search_by=name HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54581 - "GET /api/recipes/1/nutrition HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54585 - "GET /api/recipes/1/steps HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54588 - "POST /api/recipes/1/steps HTTP/1.1" 201 Created
+INFO:     127.0.0.1:61284 - "OPTIONS /api/weight-records?user_id=1&date_start=2026-07-12&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61285 - "OPTIONS /api/users/1/history HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61286 - "OPTIONS /api/exercise-sessions?user_id=1&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61287 - "OPTIONS /api/daily-steps?user_id=1&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)
+handle: <Handle _ProactorBasePipeTransport._call_connection_lost(None)>
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\asyncio\proactor_events.py", line 165, in _call_connection_lost
+    self._sock.shutdown(socket.SHUT_RDWR)
+ConnectionResetError: [WinError 10054] 遠端主機已強制關閉一個現存的連線。
+INFO:     127.0.0.1:61289 - "OPTIONS /api/weight-records?user_id=1&date_start=2026-07-12&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61289 - "OPTIONS /api/users/1/history HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61305 - "OPTIONS /api/weight-records?user_id=2&date_start=2026-07-12&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)
+handle: <Handle _ProactorBasePipeTransport._call_connection_lost(None)>
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\asyncio\proactor_events.py", line 165, in _call_connection_lost
+    self._sock.shutdown(socket.SHUT_RDWR)
+ConnectionResetError: [WinError 10054] 遠端主機已強制關閉一個現存的連線。
+INFO:     127.0.0.1:61344 - "OPTIONS /api/users/2/history HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61345 - "OPTIONS /api/exercise-sessions?user_id=2&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61346 - "OPTIONS /api/daily-steps?user_id=2&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61346 - "OPTIONS /api/weight-records?user_id=1&date_start=2026-07-12&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61345 - "OPTIONS /api/users/1/history HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61346 - "OPTIONS /api/exercise-sessions?user_id=1&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61345 - "OPTIONS /api/daily-steps?user_id=1&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61345 - "OPTIONS /api/weight-records?user_id=2&date_start=2026-07-12&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61346 - "OPTIONS /api/users/2/history HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61346 - "OPTIONS /api/exercise-sessions?user_id=2&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61345 - "OPTIONS /api/daily-steps?user_id=2&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61345 - "OPTIONS /api/weight-records?user_id=1&date_start=2026-07-12&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61346 - "OPTIONS /api/users/1/history HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61345 - "OPTIONS /api/exercise-sessions?user_id=1&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:61346 - "OPTIONS /api/daily-steps?user_id=1&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51066 - "OPTIONS /api/weight-records?user_id=1&date_start=2026-07-12&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51067 - "OPTIONS /api/users/1/history HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51068 - "OPTIONS /api/exercise-sessions?user_id=1&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51069 - "OPTIONS /api/daily-steps?user_id=1&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)
+handle: <Handle _ProactorBasePipeTransport._call_connection_lost(None)>
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\asyncio\proactor_events.py", line 165, in _call_connection_lost
+    self._sock.shutdown(socket.SHUT_RDWR)
+ConnectionResetError: [WinError 10054] 遠端主機已強制關閉一個現存的連線。
+INFO:     127.0.0.1:51070 - "OPTIONS /api/users/1 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51070 - "OPTIONS /api/users/1/history HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51159 - "OPTIONS /api/weight-records?user_id=1&date_start=2026-07-12&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51160 - "OPTIONS /api/exercise-sessions?user_id=1&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51161 - "OPTIONS /api/daily-steps?user_id=1&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51251 - "OPTIONS /api/weight-records?user_id=1&date_start=2026-07-12&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51252 - "OPTIONS /api/exercise-sessions?user_id=1&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51253 - "OPTIONS /api/daily-steps?user_id=1&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51251 - "OPTIONS /api/weight-records?user_id=2&date_start=2026-07-12&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51254 - "OPTIONS /api/users/2/history HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51254 - "OPTIONS /api/exercise-sessions?user_id=2&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51254 - "OPTIONS /api/daily-steps?user_id=2&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51254 - "OPTIONS /api/weight-records?user_id=1&date_start=2026-07-12&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51258 - "OPTIONS /api/exercise-sessions?user_id=1&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51259 - "OPTIONS /api/daily-steps?user_id=1&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51259 - "OPTIONS /api/weight-records?user_id=2&date_start=2026-07-12&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51258 - "OPTIONS /api/users/2/history HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51254 - "OPTIONS /api/exercise-sessions?user_id=2&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51259 - "OPTIONS /api/daily-steps?user_id=2&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51259 - "OPTIONS /api/users/2 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51259 - "OPTIONS /api/users/2/history HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51259 - "OPTIONS /api/weight-records?user_id=2&date_start=2026-07-12&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51254 - "OPTIONS /api/users/2/history HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51259 - "OPTIONS /api/exercise-sessions?user_id=2&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51258 - "OPTIONS /api/daily-steps?user_id=2&date_start=2026-08-09&date_end=2026-08-11 HTTP/1.1" 404 Not Found

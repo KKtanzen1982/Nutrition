@@ -1,0 +1,24 @@
+# 飲食管理系統 - 區塊1 依賴
+# 版本: 1.0
+
+# Core
+python-dotenv==1.0.0
+
+# 數據庫
+SQLAlchemy==2.0.21
+alembic==1.12.0
+
+# FastAPI (後續區塊使用)
+fastapi==0.104.1
+uvicorn==0.24.0
+pydantic==2.5.0
+
+# 工具
+click==8.1.7
+tqdm==4.66.1
+
+# 開發工具
+pytest==7.4.3
+pytest-cov==4.1.0
+black==23.11.0
+flake8==6.1.0
