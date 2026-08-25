@@ -4,4 +4,9 @@ backend/__pycache__/
 **/__pycache__/
 node_modules/
 frontend/dist/
+frontend/dev-dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+.claude/settings.local.json
 nutrition.db
