@@ -14,6 +14,7 @@ from datetime import date, timedelta
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_mcp import FastApiMCP
+from sqlalchemy import text
 
 from database import Base, engine, get_db
 from auth import ApiKeyMiddleware
@@ -100,9 +101,22 @@ def health_check():
 # ==================== 示範資料（僅供程式試用，重啟後若已有資料則跳過） ====================
 
 
+def _add_missing_columns():
+    """create_all() 只會建立全新的資料表，不會幫既有資料表補欄位；這裡用最小化手動遷移補上
+    後來新增的 nullable 欄位。只在 Postgres 上執行——本機開發用的 sqlite mock db 都是全新建表，
+    create_all() 當下就已經含所有欄位，不需要這段。"""
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE recipes ADD COLUMN IF NOT EXISTS carb_source VARCHAR(20)"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS manual_calories_target FLOAT"))
+        conn.commit()
+
+
 @app.on_event("startup")
 def seed_demo_data():
     Base.metadata.create_all(bind=engine)
+    _add_missing_columns()
 
     db = next(get_db())
     try:
