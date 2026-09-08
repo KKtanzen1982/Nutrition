@@ -13,8 +13,10 @@ from datetime import date, timedelta
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi_mcp import FastApiMCP
 
 from database import Base, engine, get_db
+from auth import ApiKeyMiddleware
 
 # 確保所有 ORM class 在 create_all() 前都已註冊到 Base.metadata（跟原本 `import models` 的作用一樣，只是拆成 6 份）
 import users.models  # noqa: F401
@@ -57,9 +59,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(ApiKeyMiddleware)
 
 for r in (users_router, fitness_router, training_router, recipes_router, meal_plans_router, shopping_router, backup_router):
     app.include_router(r, prefix="/api")
+
+# ==================== MCP（給 Claude.ai 用的工具介面） ====================
+# 只暴露 meal-plans + recipes 兩個領域：週菜單生成/調整、找食譜。
+# 其他領域（users/fitness/training/shopping）不開放給 MCP，避免暴露面過大。
+mcp = FastApiMCP(
+    app,
+    name="飲食管理系統",
+    description="讀取營養目標/偏好、生成與調整週菜單、搜尋食譜",
+    include_tags=["meal-plans", "recipes"],
+)
+mcp.mount()
 
 weight_service = WeightService()
 exercise_service = ExerciseService()
