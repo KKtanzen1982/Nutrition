@@ -66,13 +66,13 @@ for r in (users_router, fitness_router, training_router, recipes_router, meal_pl
     app.include_router(r, prefix="/api")
 
 # ==================== MCP（給 Claude.ai 用的工具介面） ====================
-# 只暴露 meal-plans + recipes 兩個領域：週菜單生成/調整、找食譜。
-# 其他領域（users/fitness/training/shopping）不開放給 MCP，避免暴露面過大。
+# 開放所有功能領域（users/fitness/training/recipes/meal-plans/shopping），
+# 唯獨排除 backup：/backup/import 會整個清空、覆蓋資料庫，屬於危險操作，不透過 MCP 開放。
 mcp = FastApiMCP(
     app,
     name="飲食管理系統",
-    description="讀取營養目標/偏好、生成與調整週菜單、搜尋食譜",
-    include_tags=["meal-plans", "recipes"],
+    description="讀寫使用者資料、體重/運動記錄、訓練排程、食譜庫、週菜單、購物地點",
+    exclude_tags=["backup"],
 )
 mcp.mount_http()
 
