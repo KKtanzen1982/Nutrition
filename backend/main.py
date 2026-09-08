@@ -73,7 +73,7 @@ mcp = FastApiMCP(
     description="讀取營養目標/偏好、生成與調整週菜單、搜尋食譜",
     include_tags=["meal-plans", "recipes"],
 )
-mcp.mount()
+mcp.mount_http()
 
 weight_service = WeightService()
 exercise_service = ExerciseService()
