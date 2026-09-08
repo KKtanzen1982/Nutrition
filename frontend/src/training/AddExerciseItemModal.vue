@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import CustomSelect from '../shared/CustomSelect.vue'
 import Modal from '../shared/Modal.vue'
+import { useCustomOptionList } from '../shared/useCustomOptionList'
 import { createExerciseItem, listExerciseItems } from './exercise_item_api'
 import type { ExerciseItemLibraryEntry, ExerciseItemType, ExerciseLibraryItem } from '../shared/types'
 
@@ -18,12 +20,23 @@ const emit = defineEmits<{
 
 const existingGymItems = ref<ExerciseLibraryItem[]>([])
 
+// 分類/肌群/器材：內建（分類）或既有資料裡出現過的值 + 使用者自訂的值（存在本機，可編輯/刪除）
+const categoryCustom = useCustomOptionList('nutrition_custom_exercise_categories', GYM_CATEGORIES)
+const muscleGroupCustom = useCustomOptionList('nutrition_custom_muscle_groups')
+const equipmentCustom = useCustomOptionList('nutrition_custom_equipment')
+
 const categoryOptions = computed(() => {
   const fromData = existingGymItems.value.map((i) => i.category)
-  return [...new Set([...GYM_CATEGORIES, ...fromData])]
+  return [...new Set([...categoryCustom.allOptions.value, ...fromData])]
 })
-const muscleGroupOptions = computed(() => [...new Set(existingGymItems.value.map((i) => i.muscle_group).filter((v): v is string => !!v))].sort())
-const equipmentOptions = computed(() => [...new Set(existingGymItems.value.map((i) => i.equipment).filter((v): v is string => !!v))].sort())
+const muscleGroupOptions = computed(() => {
+  const fromData = existingGymItems.value.map((i) => i.muscle_group).filter((v): v is string => !!v)
+  return [...new Set([...muscleGroupCustom.allOptions.value, ...fromData])].sort()
+})
+const equipmentOptions = computed(() => {
+  const fromData = existingGymItems.value.map((i) => i.equipment).filter((v): v is string => !!v)
+  return [...new Set([...equipmentCustom.allOptions.value, ...fromData])].sort()
+})
 
 const form = reactive({
   item_name: '',
@@ -115,39 +128,48 @@ async function submit() {
     <div v-if="itemType === 'gym'" class="mt-3 grid grid-cols-2 gap-3">
       <label class="text-xs text-tea">
         分類
-        <input
-          v-model="form.category"
-          type="text"
-          list="add-item-category-options"
-          class="mt-1 w-full rounded border border-ink/15 bg-bg px-2 py-1 text-sm text-ink"
-        />
-        <datalist id="add-item-category-options">
-          <option v-for="c in categoryOptions" :key="c" :value="c" />
-        </datalist>
+        <div class="mt-1">
+          <CustomSelect
+            v-model="form.category"
+            :options="categoryOptions"
+            :manageable-options="categoryCustom.customOptions.value"
+            label="分類"
+            :allow-empty="false"
+            :add-option="categoryCustom.addOption"
+            :rename-option="categoryCustom.renameOption"
+            :remove-option="categoryCustom.removeOption"
+          />
+        </div>
       </label>
       <label class="text-xs text-tea">
         肌群
-        <input
-          v-model="form.muscle_group"
-          type="text"
-          list="add-item-muscle-group-options"
-          class="mt-1 w-full rounded border border-ink/15 bg-bg px-2 py-1 text-sm text-ink"
-        />
-        <datalist id="add-item-muscle-group-options">
-          <option v-for="m in muscleGroupOptions" :key="m" :value="m" />
-        </datalist>
+        <div class="mt-1">
+          <CustomSelect
+            v-model="form.muscle_group"
+            :options="muscleGroupOptions"
+            :manageable-options="muscleGroupCustom.customOptions.value"
+            label="肌群"
+            empty-label="未指定"
+            :add-option="muscleGroupCustom.addOption"
+            :rename-option="muscleGroupCustom.renameOption"
+            :remove-option="muscleGroupCustom.removeOption"
+          />
+        </div>
       </label>
       <label class="text-xs text-tea">
         器材
-        <input
-          v-model="form.equipment"
-          type="text"
-          list="add-item-equipment-options"
-          class="mt-1 w-full rounded border border-ink/15 bg-bg px-2 py-1 text-sm text-ink"
-        />
-        <datalist id="add-item-equipment-options">
-          <option v-for="e in equipmentOptions" :key="e" :value="e" />
-        </datalist>
+        <div class="mt-1">
+          <CustomSelect
+            v-model="form.equipment"
+            :options="equipmentOptions"
+            :manageable-options="equipmentCustom.customOptions.value"
+            label="器材"
+            empty-label="未指定"
+            :add-option="equipmentCustom.addOption"
+            :rename-option="equipmentCustom.renameOption"
+            :remove-option="equipmentCustom.removeOption"
+          />
+        </div>
       </label>
       <label class="text-xs text-tea">
         建議組數

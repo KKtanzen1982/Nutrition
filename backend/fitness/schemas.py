@@ -1,4 +1,5 @@
 from datetime import datetime, date
+from datetime import date as _Date  # 避免 `date: Optional[date] = None` 這種欄位名跟型別同名時，pydantic 把型別解析成 None
 from typing import Optional, List
 from pydantic import BaseModel, Field
 
@@ -65,6 +66,16 @@ class ExerciseSessionBase(BaseModel):
 
 
 class ExerciseSessionCreate(ExerciseSessionBase):
+    details: Optional[List[ExerciseDetailCreate]] = None
+
+
+class ExerciseSessionUpdate(BaseModel):
+    date: Optional[_Date] = None
+    exercise_type: Optional[str] = None
+    duration_min: Optional[int] = Field(None, ge=1)
+    intensity: Optional[str] = None
+    calories_burned: Optional[float] = None
+    notes: Optional[str] = None
     details: Optional[List[ExerciseDetailCreate]] = None
 
 

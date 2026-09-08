@@ -24,3 +24,15 @@ export function fetchTrainingScheduleEntry(id: number): Promise<TrainingSchedule
 export function linkActualSchedule(id: number, exerciseSessionId: number): Promise<TrainingScheduleEntry> {
   return apiPut<TrainingScheduleEntry>(`/training-schedule/${id}/link-actual`, { exercise_session_id: exerciseSessionId })
 }
+
+export interface NotionSyncResult {
+  created: number
+  failed: { schedule_id: number | null; detail: string }[]
+}
+
+export function syncTrainingScheduleToNotion(scheduleIds: number[]): Promise<NotionSyncResult> {
+  return apiPost<NotionSyncResult>(
+    '/training-schedule/sync-notion',
+    scheduleIds.map((schedule_id) => ({ schedule_id })),
+  )
+}

@@ -77,6 +77,39 @@ class ExerciseService:
     def get_exercise_session(self, db: Session, session_id: int) -> Optional[ExerciseSession]:
         return db.get(ExerciseSession, session_id)
 
+    def update_exercise_session(self, db: Session, session_id: int, data) -> Optional[ExerciseSession]:
+        """更新運動紀錄；帶 details 就整份取代明細"""
+        session = db.get(ExerciseSession, session_id)
+        if not session:
+            return None
+
+        update_data = data.model_dump(exclude_unset=True, exclude={"details"})
+        for k, v in update_data.items():
+            setattr(session, k, v)
+
+        if data.details is not None:
+            details = [d.model_dump() for d in data.details]
+            _validate_and_track_library_usage(db, session.user_id, details)
+            for d in session.details:
+                db.delete(d)
+            db.flush()
+            for i, detail in enumerate(details, start=1):
+                detail["order"] = detail.get("order") or i
+                db.add(ExerciseDetail(session_id=session.id, **detail))
+
+        session.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(session)
+        return session
+
+    def delete_exercise_session(self, db: Session, session_id: int) -> bool:
+        session = db.get(ExerciseSession, session_id)
+        if not session:
+            return False
+        db.delete(session)
+        db.commit()
+        return True
+
     def get_weekly_stats(self, db: Session, user_id: int) -> Dict:
         today = date.today()
         monday = today - timedelta(days=today.weekday())
@@ -129,6 +162,14 @@ class StepsService:
         db.commit()
         db.refresh(steps)
         return steps
+
+    def delete_steps(self, db: Session, steps_id: int) -> bool:
+        steps = db.get(DailySteps, steps_id)
+        if not steps:
+            return False
+        db.delete(steps)
+        db.commit()
+        return True
 
     def get_steps(self, db: Session, user_id: int, skip: int = 0, limit: int = 10) -> List[DailySteps]:
         return (

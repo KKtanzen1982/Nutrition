@@ -6,6 +6,23 @@ from typing import Optional, Dict
 ACTIVITY_COEFFICIENTS = {"久坐": 1.2, "輕度": 1.375, "中度": 1.55, "高度": 1.725,
                           "低": 1.2, "中": 1.55, "高": 1.725}  # 本專案 activity_level 實際用「低/中/高」
 
+FAT_KCAL_PER_KG = 7700  # 1 公斤體脂約等於 7700kcal，用來把「要減多少、多久內減完」換算成每日赤字
+MAX_DEFICIT_PCT_OF_TDEE = 0.10  # 安全上限：每日赤字最多不超過 TDEE 的 10%，避免目標期限太趕算出過大赤字
+DEFICIT_RECALC_INTERVAL_DAYS = 30  # 赤字每 30 天才依當時體重重新計算一次，不隨每天量體重的小波動抖動
+
+
+def calculate_goal_based_deficit(tdee: float, current_weight_kg: float, target_weight_kg: float,
+                                  target_date: date_cls, today: date_cls) -> float:
+    """依「目前體重、目標體重、目標日期」算出每日熱量赤字（正數＝要從 TDEE 扣掉多少）。
+    設定了目標體重／日期時取代 adjust_for_goal 裡「減脂固定 -350」的寫死值。"""
+    weight_to_lose = current_weight_kg - target_weight_kg
+    remaining_days = (target_date - today).days
+    if weight_to_lose <= 0 or remaining_days <= 0:
+        return 0.0
+    needed_daily_deficit = weight_to_lose * FAT_KCAL_PER_KG / remaining_days
+    safety_cap = tdee * MAX_DEFICIT_PCT_OF_TDEE
+    return round(min(needed_daily_deficit, safety_cap), 1)
+
 
 def calculate_bmr(gender: str, weight_kg: float, height_cm: float, age: int, method: str = "harris_benedict") -> float:
     if method == "mifflin":

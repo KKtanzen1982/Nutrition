@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watchEffect } from 'vue'
+import TemplateFormModal from './TemplateFormModal.vue'
 import TrainingProgramFormModal from './TrainingProgramFormModal.vue'
 import { deleteTrainingProgram, fetchTrainingPrograms } from './training_program_api'
 import {
   createTrainingSchedule,
   deleteTrainingSchedule,
   fetchTrainingSchedule,
+  syncTrainingScheduleToNotion,
   updateTrainingSchedule,
 } from './training_schedule_api'
 import { fetchTrainingTargets, updateTrainingTargets } from './training_target_api'
@@ -62,6 +64,16 @@ async function removeProgram(program: TrainingProgram) {
   }
 }
 
+// ---- 編輯已建立計畫某一天的訓練項目（新增/刪除動作）：直接開對應的範本編輯視窗 ----
+
+const editingTemplateId = ref<number | null>(null)
+const showEditTemplate = ref(false)
+
+function editDayTemplate(day: TrainingProgramDay) {
+  editingTemplateId.value = day.workout_template_id
+  showEditTemplate.value = true
+}
+
 // ---- 月曆 ----
 
 const cursor = ref(new Date())
@@ -105,6 +117,28 @@ const scheduleByDate = computed(() => {
   return map
 })
 
+// ---- 同步本月排程到 Notion（時間統一預設晚上 9:30，需要後端設定 NOTION_TOKEN / NOTION_DATABASE_ID） ----
+
+const syncingNotion = ref(false)
+const notionSyncMessage = ref<string | null>(null)
+const notionSyncError = ref<string | null>(null)
+
+async function syncMonthToNotion() {
+  syncingNotion.value = true
+  notionSyncMessage.value = null
+  notionSyncError.value = null
+  try {
+    const scheduleIds = scheduleEntries.value.filter((s) => s.status !== '已跳過').map((s) => s.id)
+    const result = await syncTrainingScheduleToNotion(scheduleIds)
+    notionSyncMessage.value =
+      result.failed.length > 0 ? `已同步 ${result.created} 筆，${result.failed.length} 筆失敗` : `已同步 ${result.created} 筆到 Notion`
+  } catch (e) {
+    notionSyncError.value = e instanceof Error ? e.message : '同步失敗，請稍後再試'
+  } finally {
+    syncingNotion.value = false
+  }
+}
+
 interface CalendarCell {
   date: Date
   iso: string
@@ -127,19 +161,37 @@ const calendarCells = computed<CalendarCell[]>(() => {
   return cells
 })
 
+// 週六、週日在最右兩欄，右側空間不夠放小視窗，改往左側展開避免被裁切
+function isRightEdgeColumn(cell: CalendarCell): boolean {
+  return (cell.date.getDay() + 6) % 7 >= 5
+}
+
 const todayIso = toISODate(new Date())
 
 // ---- 排程互動：點卡片 → 點日期格（不用拖曳） ----
 
-const armedDay = ref<{ programDayId: number; label: string } | null>(null)
+interface ArmedDay {
+  program: TrainingProgram
+  dayIndex: number
+  programDayId: number
+  label: string
+}
+
+const armedDay = ref<ArmedDay | null>(null)
 const movingScheduleId = ref<number | null>(null)
 const selectedScheduleIso = ref<string | null>(null)
 const actionError = ref<string | null>(null)
 
-function armDay(program: TrainingProgram, day: TrainingProgramDay) {
+function armDay(program: TrainingProgram, dayIndex: number) {
   movingScheduleId.value = null
   selectedScheduleIso.value = null
-  armedDay.value = { programDayId: day.id, label: day.day_label || `${program.program_name} Day${day.day_number}` }
+  const day = program.days[dayIndex]
+  armedDay.value = {
+    program,
+    dayIndex,
+    programDayId: day.id,
+    label: day.day_label || `${program.program_name} Day${day.day_number}`,
+  }
 }
 
 function cancelArmed() {
@@ -175,7 +227,11 @@ async function onCellClick(iso: string) {
   if (armedDay.value) {
     try {
       await createTrainingSchedule({ program_day_id: armedDay.value.programDayId, scheduled_date: iso })
-      armedDay.value = null
+      const { program, dayIndex } = armedDay.value
+      const nextIndex = dayIndex + 1
+      // 排完這天就直接接著選下一個 Day，不用每次都回去點卡片，直到這個計畫的天數都排完為止
+      if (nextIndex < program.days.length) armDay(program, nextIndex)
+      else armedDay.value = null
       if (activeUser.value) await loadSchedule(activeUser.value.id, monthParam.value)
     } catch (e) {
       actionError.value = e instanceof Error ? e.message : '排程失敗'
@@ -327,24 +383,32 @@ watchEffect(() => {
           </div>
           <ul class="mt-2 flex flex-wrap gap-1.5">
             <li
-              v-for="day in program.days"
+              v-for="(day, dayIndex) in program.days"
               :key="day.id"
-              class="cursor-pointer rounded-full px-2.5 py-1 text-xs transition"
+              class="flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 text-xs transition"
               :class="
                 armedDay?.programDayId === day.id
                   ? 'bg-accent text-on-accent'
                   : 'bg-accent-tint text-ink hover:bg-accent-tint/70'
               "
-              @click="armDay(program, day)"
+              @click="armDay(program, dayIndex)"
             >
-              Day {{ day.day_number }}<span v-if="day.day_label"> · {{ day.day_label }}</span>
+              <span>Day {{ day.day_number }}<span v-if="day.day_label"> · {{ day.day_label }}</span></span>
+              <button
+                type="button"
+                class="shrink-0 opacity-70 hover:opacity-100"
+                title="編輯這天的訓練項目"
+                @click.stop="editDayTemplate(day)"
+              >
+                ✎
+              </button>
             </li>
           </ul>
         </li>
       </ul>
 
       <p v-if="armedDay" class="mt-4 rounded-lg bg-accent-tint px-3 py-2 text-sm text-ink">
-        已選取「{{ armedDay.label }}」，點下面月曆的日期格子排上去
+        已選取「{{ armedDay.label }}」，點下面月曆的日期格子排上去；排完會自動接著選下一天
         <button type="button" class="ml-2 text-xs font-semibold text-tea underline" @click="cancelArmed">取消</button>
       </p>
       <p v-if="movingScheduleId !== null" class="mt-4 rounded-lg bg-accent-tint px-3 py-2 text-sm text-ink">
@@ -359,6 +423,20 @@ watchEffect(() => {
           <button type="button" class="rounded-full px-2 py-1 text-sm text-tea hover:text-ink" @click="nextMonth">›</button>
         </div>
 
+        <div class="mt-2 flex items-center justify-end">
+          <button
+            type="button"
+            class="text-xs font-semibold text-accent hover:text-accent-bright disabled:opacity-50"
+            :disabled="scheduleEntries.length === 0 || syncingNotion"
+            @click="syncMonthToNotion"
+          >
+            {{ syncingNotion ? '同步中…' : '同步本月排程到 Notion' }}
+          </button>
+        </div>
+        <p class="mt-1 text-right text-[11px] text-tea">只會帶日期，不含時間；動作內文以每組一行呈現，方便中途調整</p>
+        <p v-if="notionSyncMessage" class="mt-1 text-right text-[11px] text-accent">{{ notionSyncMessage }}</p>
+        <p v-if="notionSyncError" class="mt-1 rounded-lg bg-alert/10 px-3 py-2 text-right text-xs text-alert">{{ notionSyncError }}</p>
+
         <p v-if="scheduleLoading" class="mt-3 text-sm text-tea">載入中…</p>
         <p v-else-if="scheduleError" class="mt-3 rounded-lg bg-alert/10 px-3 py-2 text-sm text-alert">{{ scheduleError }}</p>
 
@@ -367,62 +445,71 @@ watchEffect(() => {
             <span v-for="w in ['一', '二', '三', '四', '五', '六', '日']" :key="w">{{ w }}</span>
           </div>
           <div class="mt-1 grid grid-cols-7 gap-1">
-            <button
-              v-for="cell in calendarCells"
-              :key="cell.iso"
-              type="button"
-              class="relative flex h-16 flex-col items-center justify-start rounded-lg border p-1 text-left"
-              :class="[
-                cell.inMonth ? 'border-ink/10' : 'border-transparent opacity-30',
-                cell.iso === todayIso ? 'ring-1 ring-accent' : '',
-                selectedScheduleIso === cell.iso ? 'bg-accent-tint' : 'bg-bg',
-              ]"
-              @click="onCellClick(cell.iso)"
-            >
-              <span
-                v-if="scheduleByDate.get(cell.iso)?.volume_adjustment_pct"
-                class="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-alert"
-                title="建議追量"
-              />
-              <span class="text-[10px] text-tea">{{ cell.date.getDate() }}</span>
-              <span
-                v-if="scheduleByDate.get(cell.iso)"
-                class="mt-0.5 w-full truncate rounded px-1 py-0.5 text-[10px]"
-                :class="statusColor(scheduleByDate.get(cell.iso)!.status)"
+            <div v-for="cell in calendarCells" :key="cell.iso" class="relative">
+              <button
+                type="button"
+                class="relative flex h-16 w-full flex-col items-center justify-start rounded-lg border p-1 text-left"
+                :class="[
+                  cell.inMonth ? 'border-ink/10' : 'border-transparent opacity-30',
+                  cell.iso === todayIso ? 'ring-1 ring-accent' : '',
+                  selectedScheduleIso === cell.iso ? 'bg-accent-tint' : 'bg-bg',
+                ]"
+                @click="onCellClick(cell.iso)"
               >
-                {{ scheduleByDate.get(cell.iso)!.day_label || scheduleByDate.get(cell.iso)!.program_name }}
-              </span>
-            </button>
+                <span
+                  v-if="scheduleByDate.get(cell.iso)?.volume_adjustment_pct"
+                  class="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-alert"
+                  title="建議追量"
+                />
+                <span class="text-[10px] text-tea">{{ cell.date.getDate() }}</span>
+                <span
+                  v-if="scheduleByDate.get(cell.iso)"
+                  class="mt-0.5 w-full truncate rounded px-1 py-0.5 text-[10px]"
+                  :class="statusColor(scheduleByDate.get(cell.iso)!.status)"
+                >
+                  {{ scheduleByDate.get(cell.iso)!.day_label || scheduleByDate.get(cell.iso)!.program_name }}
+                </span>
+              </button>
+
+              <div
+                v-if="selectedSchedule && selectedScheduleIso === cell.iso"
+                class="absolute top-0 z-20 w-56 rounded-lg border border-ink/10 bg-surface p-3 shadow-lg"
+                :class="isRightEdgeColumn(cell) ? 'right-full mr-2' : 'left-full ml-2'"
+              >
+                <div class="flex items-start justify-between gap-2">
+                  <p class="text-sm text-ink">
+                    {{ selectedSchedule.scheduled_date }} · {{ selectedSchedule.day_label || selectedSchedule.program_name }}
+                    <span class="block text-xs text-tea">（{{ selectedSchedule.status }}）</span>
+                  </p>
+                  <button type="button" class="shrink-0 text-xs text-tea hover:text-ink" aria-label="關閉" @click="selectedScheduleIso = null">
+                    ✕
+                  </button>
+                </div>
+                <p v-if="selectedSchedule.volume_adjustment_pct" class="mt-1 text-xs text-alert">
+                  前面進度落後，建議這天加量 {{ Math.round(selectedSchedule.volume_adjustment_pct * 100) }}%
+                </p>
+                <RouterLink
+                  v-if="needsActualLog"
+                  :to="`/exercise?schedule_id=${selectedSchedule.id}`"
+                  class="mt-2 inline-block rounded-full bg-accent px-3 py-1 text-xs font-semibold text-on-accent hover:bg-accent-bright"
+                >
+                  補登實際紀錄
+                </RouterLink>
+                <div class="mt-2 flex flex-wrap gap-3">
+                  <button type="button" class="text-xs font-semibold text-accent hover:text-accent-bright" @click="startMoving(selectedSchedule.id)">
+                    移動
+                  </button>
+                  <button type="button" class="text-xs font-semibold text-tea hover:text-ink" @click="markSkipped(selectedSchedule.id)">
+                    標記已跳過
+                  </button>
+                  <button type="button" class="text-xs text-tea hover:text-alert" @click="removeSchedule(selectedSchedule.id)">
+                    移除排程
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </template>
-
-        <div v-if="selectedSchedule" class="mt-4 rounded-lg border border-ink/10 p-3">
-          <p class="text-sm text-ink">
-            {{ selectedSchedule.scheduled_date }} · {{ selectedSchedule.day_label || selectedSchedule.program_name }}
-            <span class="ml-1 text-xs text-tea">（{{ selectedSchedule.status }}）</span>
-          </p>
-          <p v-if="selectedSchedule.volume_adjustment_pct" class="mt-1 text-xs text-alert">
-            前面進度落後，建議這天加量 {{ Math.round(selectedSchedule.volume_adjustment_pct * 100) }}%
-          </p>
-          <RouterLink
-            v-if="needsActualLog"
-            :to="`/exercise?schedule_id=${selectedSchedule.id}`"
-            class="mt-2 inline-block rounded-full bg-accent px-3 py-1 text-xs font-semibold text-on-accent hover:bg-accent-bright"
-          >
-            補登實際紀錄
-          </RouterLink>
-          <div class="mt-2 flex flex-wrap gap-3">
-            <button type="button" class="text-xs font-semibold text-accent hover:text-accent-bright" @click="startMoving(selectedSchedule.id)">
-              移動
-            </button>
-            <button type="button" class="text-xs font-semibold text-tea hover:text-ink" @click="markSkipped(selectedSchedule.id)">
-              標記已跳過
-            </button>
-            <button type="button" class="text-xs text-tea hover:text-alert" @click="removeSchedule(selectedSchedule.id)">
-              移除排程
-            </button>
-          </div>
-        </div>
 
         <p v-if="actionError" class="mt-3 rounded-lg bg-alert/10 px-3 py-2 text-sm text-alert">{{ actionError }}</p>
       </section>
@@ -483,5 +570,6 @@ watchEffect(() => {
     </template>
 
     <TrainingProgramFormModal v-model="showForm" :user-id="activeUser?.id ?? null" @created="onCreated" />
+    <TemplateFormModal v-model="showEditTemplate" :template-id="editingTemplateId" :user-id="activeUser?.id ?? null" />
   </div>
 </template>

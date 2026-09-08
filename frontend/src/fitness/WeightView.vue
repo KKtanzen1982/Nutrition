@@ -7,10 +7,13 @@ import {
   fetchWeightRecords,
   updateWeightRecord,
 } from './weight_api'
+import DateRangeButton from '../trends/DateRangeButton.vue'
 import { useConfirmDialog } from '../shared/useConfirmDialog'
 import { useHouseholdConfig } from '../shared/useHouseholdConfig'
 import { daysAgo, toISODate, today } from '../shared/date_utils'
 import type { WeightRecord } from '../shared/types'
+
+const HISTORY_FETCH_DAYS = 365
 
 const { activeUser } = useHouseholdConfig()
 const { confirmDialog } = useConfirmDialog()
@@ -38,7 +41,7 @@ async function load(userId: number) {
   error.value = null
   try {
     const [weightRecords, goalHistory] = await Promise.all([
-      fetchWeightRecords(userId, daysAgo(90), today()),
+      fetchWeightRecords(userId, daysAgo(HISTORY_FETCH_DAYS), today()),
       fetchUserGoalHistory(userId),
     ])
     records.value = weightRecords
@@ -121,15 +124,61 @@ async function submit() {
   }
 }
 
-async function remove(record: WeightRecord) {
-  if (!activeUser.value) return
-  if (!(await confirmDialog(`刪除 ${record.date} 的體重紀錄？`))) return
-  saveError.value = null
+// ---- 歷史紀錄：編輯模式（多選 + 區間篩選），一般瀏覽時不可點選/刪除 ----
+
+const historyFrom = ref(toISODate(daysAgo(90)))
+const historyTo = ref(todayStr)
+
+const filteredHistory = computed(() =>
+  sortedDesc.value.filter((r) => r.date >= historyFrom.value && r.date <= historyTo.value),
+)
+
+const editMode = ref(false)
+const selectedIds = ref<Set<number>>(new Set())
+const bulkDeleting = ref(false)
+const bulkDeleteError = ref<string | null>(null)
+
+function toggleEditMode() {
+  editMode.value = !editMode.value
+  selectedIds.value = new Set()
+  bulkDeleteError.value = null
+}
+
+function toggleSelect(id: number) {
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedIds.value = next
+}
+
+const allVisibleSelected = computed(
+  () => filteredHistory.value.length > 0 && filteredHistory.value.every((r) => selectedIds.value.has(r.id)),
+)
+
+function toggleSelectAll() {
+  selectedIds.value = allVisibleSelected.value
+    ? new Set()
+    : new Set(filteredHistory.value.map((r) => r.id))
+}
+
+function onRowClick(record: WeightRecord) {
+  if (!editMode.value) return
+  selectedDate.value = record.date
+}
+
+async function bulkDelete() {
+  if (!activeUser.value || selectedIds.value.size === 0) return
+  if (!(await confirmDialog(`刪除選取的 ${selectedIds.value.size} 筆體重紀錄？`))) return
+  bulkDeleting.value = true
+  bulkDeleteError.value = null
   try {
-    await deleteWeightRecord(record.id)
+    await Promise.all([...selectedIds.value].map((id) => deleteWeightRecord(id)))
+    selectedIds.value = new Set()
     await load(activeUser.value.id)
   } catch (e) {
-    saveError.value = e instanceof Error ? e.message : '刪除失敗，請稍後再試'
+    bulkDeleteError.value = e instanceof Error ? e.message : '刪除失敗，請稍後再試'
+  } finally {
+    bulkDeleting.value = false
   }
 }
 
@@ -218,20 +267,51 @@ const gapToTarget = computed(() => {
       </section>
 
       <section class="mt-8">
-        <h2 class="font-serif text-xl text-ink">歷史紀錄</h2>
+        <div class="flex items-center justify-between">
+          <h2 class="font-serif text-xl text-ink">歷史紀錄</h2>
+          <button type="button" class="text-xs font-semibold text-accent hover:text-accent-bright" @click="toggleEditMode">
+            {{ editMode ? '完成' : '編輯' }}
+          </button>
+        </div>
+
+        <div class="mt-3">
+          <DateRangeButton v-model:from="historyFrom" v-model:to="historyTo" :max="todayStr" />
+        </div>
+
+        <div v-if="editMode && filteredHistory.length" class="mt-3 flex items-center justify-between rounded-lg bg-accent-tint px-3 py-2">
+          <label class="flex items-center gap-2 text-xs text-ink">
+            <input type="checkbox" :checked="allVisibleSelected" @change="toggleSelectAll" />
+            全選（{{ selectedIds.size }} / {{ filteredHistory.length }}）
+          </label>
+          <button
+            type="button"
+            class="rounded-full border border-alert px-3 py-1 text-xs font-semibold text-alert hover:bg-alert/10 disabled:opacity-50"
+            :disabled="selectedIds.size === 0 || bulkDeleting"
+            @click="bulkDelete"
+          >
+            {{ bulkDeleting ? '刪除中…' : `刪除選取（${selectedIds.size}）` }}
+          </button>
+        </div>
+        <p v-if="bulkDeleteError" class="mt-2 rounded-lg bg-alert/10 px-3 py-2 text-sm text-alert">{{ bulkDeleteError }}</p>
+
         <p v-if="loading" class="mt-3 text-sm text-tea">載入中…</p>
         <p v-else-if="error" class="mt-3 rounded-lg bg-alert/10 px-3 py-2 text-sm text-alert">{{ error }}</p>
-        <p v-else-if="sortedDesc.length === 0" class="mt-3 text-sm text-tea">尚無紀錄</p>
+        <p v-else-if="filteredHistory.length === 0" class="mt-3 text-sm text-tea">尚無符合條件的紀錄</p>
         <ul v-else class="mt-3 divide-y divide-ink/10">
-          <li v-for="r in sortedDesc" :key="r.id" class="flex items-center justify-between py-3">
-            <button type="button" class="text-left" @click="selectedDate = r.date">
-              <p class="text-sm text-ink">{{ r.date }}</p>
-              <p v-if="r.body_fat_percent !== null" class="text-xs text-tea">體脂 {{ r.body_fat_percent }}%</p>
-            </button>
+          <li v-for="r in filteredHistory" :key="r.id" class="flex items-center justify-between py-3">
             <div class="flex items-center gap-3">
-              <span class="font-serif text-lg text-ink">{{ r.weight_kg }}<small class="text-sm text-tea">kg</small></span>
-              <button type="button" class="text-xs text-tea hover:text-alert" @click="remove(r)">刪除</button>
+              <input
+                v-if="editMode"
+                type="checkbox"
+                :checked="selectedIds.has(r.id)"
+                @change="toggleSelect(r.id)"
+              />
+              <button type="button" class="text-left" :class="{ 'cursor-default': !editMode }" @click="onRowClick(r)">
+                <p class="text-sm text-ink">{{ r.date }}</p>
+                <p v-if="r.body_fat_percent !== null" class="text-xs text-tea">體脂 {{ r.body_fat_percent }}%</p>
+              </button>
             </div>
+            <span class="font-serif text-lg text-ink">{{ r.weight_kg }}<small class="text-sm text-tea">kg</small></span>
           </li>
         </ul>
       </section>

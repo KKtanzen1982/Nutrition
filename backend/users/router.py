@@ -6,8 +6,9 @@ from database import get_db
 from users.schemas import (
     UserCreate, UserResponse, UserUpdate,
     DietaryPreferenceUpdate, DietaryPreferenceResponse,
+    WeightGoalUpdate, WeightGoalResponse,
 )
-from users.services import user_service, dietary_preference_service
+from users.services import user_service, dietary_preference_service, weight_goal_service
 
 router = APIRouter(tags=["users"])
 
@@ -57,6 +58,21 @@ def get_user_goal_history(user_id: int, db: Session = Depends(get_db)):
     if not user_service.get_user(db, user_id):
         raise HTTPException(status_code=404, detail="用戶不存在")
     return []
+
+
+@router.get("/users/{user_id}/weight-goal", response_model=WeightGoalResponse)
+def get_weight_goal(user_id: int, db: Session = Depends(get_db)):
+    """減脂的目標體重＋目標日期，用來動態算每日熱量赤字（見 nutrition_calc.py）"""
+    if not user_service.get_user(db, user_id):
+        raise HTTPException(status_code=404, detail="使用者不存在")
+    return weight_goal_service.get(db, user_id)
+
+
+@router.put("/users/{user_id}/weight-goal", response_model=WeightGoalResponse)
+def set_weight_goal(user_id: int, payload: WeightGoalUpdate, db: Session = Depends(get_db)):
+    if not user_service.get_user(db, user_id):
+        raise HTTPException(status_code=404, detail="使用者不存在")
+    return weight_goal_service.set(db, user_id, payload)
 
 
 @router.get("/users/{user_id}/dietary-preferences", response_model=DietaryPreferenceResponse)

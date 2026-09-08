@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { reactive, ref, watchEffect } from 'vue'
 import FactsRow from '../shared/FactsRow.vue'
-import { fetchUser, fetchUserGoalHistory, updateUser } from './users_api'
+import { fetchNutritionTargets, fetchUser, fetchUserGoalHistory, fetchWeightGoal, updateUser, updateWeightGoal } from './users_api'
 import { fetchDietaryPreferences, updateDietaryPreferences } from './dietary_preference_api'
 import { useHouseholdConfig } from '../shared/useHouseholdConfig'
-import type { DietaryPreference, GoalHistoryEntry, UpdateDietaryPreferencePayload, UpdateUserPayload, UserProfile } from '../shared/types'
+import type {
+  DietaryPreference, GoalHistoryEntry, NutritionTargets, UpdateDietaryPreferencePayload, UpdateUserPayload,
+  UpdateWeightGoalPayload, UserProfile, WeightGoal,
+} from '../shared/types'
 
 const GENDERS = ['男', '女', '其他']
 const GOALS = ['減脂', '增肌', '維持']
@@ -37,6 +40,29 @@ const saving = ref(false)
 const saveError = ref<string | null>(null)
 const form = reactive<UpdateUserPayload>({})
 
+// ---- 減脂目標體重＋目標日期：設定後每日熱量赤字會依 TDEE 動態算，而不是固定 -350kcal ----
+const weightGoal = ref<WeightGoal | null>(null)
+const weightGoalForm = reactive<UpdateWeightGoalPayload>({})
+
+async function loadWeightGoal(userId: number) {
+  try {
+    weightGoal.value = await fetchWeightGoal(userId)
+  } catch {
+    weightGoal.value = null
+  }
+}
+
+// ---- TDEE 給你參考，daily_calories_target 可以手動覆蓋（見 profile.manual_calories_target） ----
+const nutritionTargets = ref<NutritionTargets | null>(null)
+
+async function loadNutritionTargets(userId: number) {
+  try {
+    nutritionTargets.value = await fetchNutritionTargets(userId)
+  } catch {
+    nutritionTargets.value = null
+  }
+}
+
 async function load(userId: number) {
   loading.value = true
   error.value = null
@@ -47,6 +73,8 @@ async function load(userId: number) {
   } finally {
     loading.value = false
   }
+  await loadWeightGoal(userId)
+  await loadNutritionTargets(userId)
 
   historyLoading.value = true
   historyError.value = null
@@ -122,6 +150,11 @@ function startEditing() {
     last_menstrual_date: profile.value.last_menstrual_date ?? '',
     menstrual_cycle_length_days: profile.value.menstrual_cycle_length_days ?? 28,
     menstrual_cycle_irregular: profile.value.menstrual_cycle_irregular ?? false,
+    manual_calories_target: profile.value.manual_calories_target ?? null,
+  })
+  Object.assign(weightGoalForm, {
+    target_weight_kg: weightGoal.value?.target_weight_kg ?? null,
+    target_date: weightGoal.value?.target_date ?? '',
   })
   saveError.value = null
   editing.value = true
@@ -143,6 +176,13 @@ async function save() {
     if (profile.value.name !== activeUser.value.name) {
       setUsers(config.value.users.map((u) => (u.id === profile.value!.id ? { ...u, name: profile.value!.name } : u)))
     }
+    if (form.primary_goal === '減脂') {
+      weightGoal.value = await updateWeightGoal(activeUser.value.id, {
+        target_weight_kg: weightGoalForm.target_weight_kg || null,
+        target_date: weightGoalForm.target_date || null,
+      })
+    }
+    await loadNutritionTargets(activeUser.value.id)
     editing.value = false
   } catch (e) {
     saveError.value = e instanceof Error ? e.message : '儲存失敗，請稍後再試'
@@ -246,6 +286,61 @@ async function save() {
               </select>
             </template>
           </FactsRow>
+
+          <FactsRow v-if="nutritionTargets" label="TDEE（每日總消耗）">
+            {{ nutritionTargets.tdee }} kcal
+          </FactsRow>
+
+          <FactsRow label="目標攝取熱量" :editing="editing">
+            {{ nutritionTargets?.daily_calories_target ?? '—' }} kcal
+            <span v-if="nutritionTargets?.manual_override" class="ml-1 text-xs text-tea">（手動設定）</span>
+            <span v-else-if="nutritionTargets" class="ml-1 text-xs text-tea">（自動計算）</span>
+            <template #input>
+              <div class="flex items-center justify-end gap-2">
+                <input
+                  v-model.number="form.manual_calories_target"
+                  type="number"
+                  min="1000"
+                  :placeholder="`自動：${nutritionTargets?.goal_adjusted_calories ?? ''}`"
+                  class="w-28 rounded border border-ink/15 bg-bg px-2 py-1 text-right text-ink"
+                />
+                <button
+                  v-if="form.manual_calories_target"
+                  type="button"
+                  class="shrink-0 text-xs text-tea hover:text-alert"
+                  @click="form.manual_calories_target = null"
+                >
+                  清除
+                </button>
+              </div>
+            </template>
+          </FactsRow>
+
+          <template v-if="(editing && form.primary_goal === '減脂') || (!editing && profile.primary_goal === '減脂')">
+            <FactsRow label="目標體重" :editing="editing">
+              {{ weightGoal?.target_weight_kg ? `${weightGoal.target_weight_kg} kg` : '未設定' }}
+              <template #input>
+                <input
+                  v-model.number="weightGoalForm.target_weight_kg"
+                  type="number"
+                  step="0.1"
+                  min="1"
+                  placeholder="例：58"
+                  class="w-24 rounded border border-ink/15 bg-bg px-2 py-1 text-right text-ink"
+                />
+              </template>
+            </FactsRow>
+            <FactsRow label="目標日期" :editing="editing">
+              {{ weightGoal?.target_date || '未設定' }}
+              <template #input>
+                <input v-model="weightGoalForm.target_date" type="date" class="w-full rounded border border-ink/15 bg-bg px-2 py-1 text-right text-ink" />
+              </template>
+            </FactsRow>
+            <FactsRow v-if="!editing && weightGoal?.active_daily_deficit_kcal" label="目前每日熱量赤字">
+              -{{ weightGoal.active_daily_deficit_kcal }} kcal
+              <span class="ml-1 text-xs text-tea">（{{ weightGoal.deficit_calculated_at }} 依 {{ weightGoal.deficit_calculated_weight_kg }}kg 算的，每 30 天重算一次）</span>
+            </FactsRow>
+          </template>
 
           <FactsRow label="活動量" :editing="editing">
             {{ profile.activity_level }}

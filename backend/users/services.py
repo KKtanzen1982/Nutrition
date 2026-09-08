@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import List, Optional, Dict
 
-from users.models import User, DietaryPreference
+from users.models import User, DietaryPreference, WeightGoal
 
 
 class UserService:
@@ -65,3 +65,51 @@ class DietaryPreferenceService:
 
 
 dietary_preference_service = DietaryPreferenceService()
+
+
+class WeightGoalService:
+    """減脂的目標體重＋目標日期。get_row 給 nutrition_calc 內部用（要原始 ORM 物件方便寫回快取值），
+    get/set 給 API 層用（回傳 dict）。"""
+
+    def get_row(self, db: Session, user_id: int) -> Optional[WeightGoal]:
+        return db.query(WeightGoal).filter(WeightGoal.user_id == user_id).first()
+
+    def _to_dict(self, row: Optional[WeightGoal], user_id: int) -> Dict:
+        if not row:
+            return {
+                "user_id": user_id, "target_weight_kg": None, "target_date": None,
+                "active_daily_deficit_kcal": None, "deficit_calculated_at": None, "deficit_calculated_weight_kg": None,
+            }
+        return {
+            "user_id": row.user_id, "target_weight_kg": row.target_weight_kg, "target_date": row.target_date,
+            "active_daily_deficit_kcal": row.active_daily_deficit_kcal,
+            "deficit_calculated_at": row.deficit_calculated_at, "deficit_calculated_weight_kg": row.deficit_calculated_weight_kg,
+        }
+
+    def get(self, db: Session, user_id: int) -> Dict:
+        return self._to_dict(self.get_row(db, user_id), user_id)
+
+    def set(self, db: Session, user_id: int, data) -> Dict:
+        row = self.get_row(db, user_id)
+        update_data = data.model_dump(exclude_unset=True)
+        if row:
+            for k, v in update_data.items():
+                setattr(row, k, v)
+        else:
+            row = WeightGoal(user_id=user_id, **update_data)
+            db.add(row)
+        # 目標改變了，舊的赤字快取失去意義，強制下次重新計算
+        row.active_daily_deficit_kcal = None
+        row.deficit_calculated_at = None
+        row.deficit_calculated_weight_kg = None
+        db.commit()
+        return self.get(db, user_id)
+
+    def record_deficit(self, db: Session, row: WeightGoal, deficit_kcal: float, calculated_at, weight_kg: float) -> None:
+        row.active_daily_deficit_kcal = deficit_kcal
+        row.deficit_calculated_at = calculated_at
+        row.deficit_calculated_weight_kg = weight_kg
+        db.commit()
+
+
+weight_goal_service = WeightGoalService()

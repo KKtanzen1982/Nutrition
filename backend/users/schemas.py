@@ -35,6 +35,7 @@ class UserUpdate(BaseModel):
     menstrual_luteal_phase_start_offset_days: Optional[int] = None
     menstrual_luteal_phase_adjustment_calories: Optional[int] = None
     menstrual_premenstrual_adjustment_calories: Optional[int] = None
+    manual_calories_target: Optional[float] = None
 
 
 class UserResponse(UserBase):
@@ -48,6 +49,24 @@ class UserResponse(UserBase):
     menstrual_luteal_phase_start_offset_days: int = 14
     menstrual_luteal_phase_adjustment_calories: int = 150
     menstrual_premenstrual_adjustment_calories: int = 120
+    manual_calories_target: Optional[float] = None
+
+    class Config:
+        from_attributes = True
+
+
+class WeightGoalUpdate(BaseModel):
+    target_weight_kg: Optional[float] = Field(None, gt=0)
+    target_date: Optional[date] = None
+
+
+class WeightGoalResponse(BaseModel):
+    user_id: int
+    target_weight_kg: Optional[float] = None
+    target_date: Optional[date] = None
+    active_daily_deficit_kcal: Optional[float] = None
+    deficit_calculated_at: Optional[date] = None
+    deficit_calculated_weight_kg: Optional[float] = None
 
     class Config:
         from_attributes = True

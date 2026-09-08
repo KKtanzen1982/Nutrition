@@ -161,6 +161,10 @@ class TrainingScheduleLinkActual(BaseModel):
     exercise_session_id: int
 
 
+class NotionScheduleItem(BaseModel):
+    schedule_id: int
+
+
 class TrainingTargetItem(BaseModel):
     category: str
     weekly_target_count: int = Field(..., ge=0)

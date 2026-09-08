@@ -11,3 +11,4 @@ frontend/vite.config.js
 frontend/vite.config.d.ts
 .claude/settings.local.json
 nutrition.db
+local_dev_mock*.db

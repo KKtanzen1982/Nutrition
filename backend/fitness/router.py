@@ -5,7 +5,7 @@ from typing import List
 from database import get_db
 from fitness.schemas import (
     WeightRecordCreate, WeightRecordUpdate, WeightRecordResponse,
-    ExerciseSessionCreate, ExerciseSessionResponse,
+    ExerciseSessionCreate, ExerciseSessionUpdate, ExerciseSessionResponse,
     DailyStepsCreate, DailyStepsUpdate, DailyStepsResponse,
 )
 from fitness.services import WeightService, ExerciseService, StepsService
@@ -80,6 +80,27 @@ def get_exercise_session(session_id: int, db: Session = Depends(get_db)):
     return session
 
 
+@router.put("/exercise-sessions/{session_id}", response_model=ExerciseSessionResponse)
+def update_exercise_session(session_id: int, session: ExerciseSessionUpdate, db: Session = Depends(get_db)):
+    """更新運動記錄（含明細整份取代）"""
+    try:
+        updated = exercise_service.update_exercise_session(db, session_id, session)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not updated:
+        raise HTTPException(status_code=404, detail="運動記錄不存在")
+    return updated
+
+
+@router.delete("/exercise-sessions/{session_id}", status_code=204)
+def delete_exercise_session(session_id: int, db: Session = Depends(get_db)):
+    """刪除運動記錄"""
+    success = exercise_service.delete_exercise_session(db, session_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="運動記錄不存在")
+    return None
+
+
 @router.get("/exercise-weekly-stats")
 def get_weekly_stats(user_id: int, db: Session = Depends(get_db)):
     """獲取本週運動統計"""
@@ -108,6 +129,15 @@ def update_daily_steps(steps_id: int, steps: DailyStepsUpdate, db: Session = Dep
     if not updated:
         raise HTTPException(status_code=404, detail="紀錄不存在")
     return updated
+
+
+@router.delete("/daily-steps/{steps_id}", status_code=204)
+def delete_daily_steps(steps_id: int, db: Session = Depends(get_db)):
+    """刪除步數紀錄"""
+    success = steps_service.delete_steps(db, steps_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="紀錄不存在")
+    return None
 
 
 @router.get("/daily-steps/weekly-stats")

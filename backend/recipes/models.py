@@ -49,6 +49,7 @@ class Recipe(Base):
     is_active = Column(Boolean, default=True)
     is_vegetarian = Column(Boolean, default=False)
     allergen_tags = Column(String(255), default="")
+    carb_source = Column(String(20), nullable=True)  # 主食類的碳水來源（飯/麵/其他），供候選1主食輪替規則使用
     created_at = Column(DateTime, default=datetime.utcnow)
     last_updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

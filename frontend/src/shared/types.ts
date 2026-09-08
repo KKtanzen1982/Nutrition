@@ -15,9 +15,25 @@ export interface UserProfile {
   menstrual_luteal_phase_start_offset_days?: number
   menstrual_luteal_phase_adjustment_calories?: number
   menstrual_premenstrual_adjustment_calories?: number
+  manual_calories_target?: number | null
 }
 
 export type UpdateUserPayload = Partial<Omit<UserProfile, 'id'>>
+
+export interface NutritionTargets {
+  user_id: number
+  bmr: number
+  tdee: number
+  goal_adjusted_calories: number
+  menstrual_phase: string
+  menstrual_adjusted_calories: number
+  manual_override: boolean
+  daily_calories_target: number
+  daily_protein_g: number
+  protein_g: number
+  carbs_g: number
+  fat_g: number
+}
 
 export interface DietaryPreference {
   user_id: number
@@ -27,6 +43,20 @@ export interface DietaryPreference {
 }
 
 export type UpdateDietaryPreferencePayload = Partial<Omit<DietaryPreference, 'user_id'>>
+
+export interface WeightGoal {
+  user_id: number
+  target_weight_kg: number | null
+  target_date: string | null
+  active_daily_deficit_kcal: number | null
+  deficit_calculated_at: string | null
+  deficit_calculated_weight_kg: number | null
+}
+
+export interface UpdateWeightGoalPayload {
+  target_weight_kg?: number | null
+  target_date?: string | null
+}
 
 export interface GoalHistoryEntry {
   goal_type: string
@@ -92,6 +122,14 @@ export interface CreateExerciseSessionPayload {
   date: string
   exercise_type: string
   duration_min: number
+  notes?: string | null
+  details?: CreateExerciseDetailPayload[]
+}
+
+export interface UpdateExerciseSessionPayload {
+  date?: string
+  exercise_type?: string
+  duration_min?: number
   notes?: string | null
   details?: CreateExerciseDetailPayload[]
 }
@@ -257,6 +295,7 @@ export interface MealDetail {
   assigned_user_id: number
   recipe_id: number
   recipe_name: string
+  recipe_category?: string | null
   serving_weight_g: number
   calories: number
   protein_g: number
@@ -281,6 +320,83 @@ export interface MealPlanDetail {
   user_b_menstrual_phase: string
   plan_status: string
   days: DayMeals[]
+}
+
+export type FixedMealType = 'breakfast' | 'afternoon_snack'
+
+export interface FixedMealPreference {
+  id: number
+  user_id: number
+  meal_type: FixedMealType
+  recipe_id: number
+  recipe_name: string | null
+}
+
+export interface ExcludedRecipe {
+  id: number
+  recipe_id: number
+  recipe_name: string | null
+}
+
+export interface FavoriteRecipe {
+  id: number
+  user_id: number
+  recipe_id: number
+  recipe_name: string | null
+}
+
+export interface SoupDayPreference {
+  days: number[] // 0=週一...6=週日
+}
+
+export interface PrepDish {
+  recipe_id: number
+  recipe_name: string
+  total_weight_g: number
+  servings: number
+}
+
+export interface BentoPrepSession {
+  prep_date: string
+  for_dates: string[]
+  rice_dishes: PrepDish[]
+  rice_cups_to_cook: number
+  rice_cook_batches: number[]
+  other_staple_dishes: PrepDish[]
+  veg_dishes: PrepDish[]
+  steps: string[]
+  meat_batch?: PrepDish[] | null
+}
+
+export interface PrepDayMeal {
+  cook_fresh: PrepDish[]
+  reheat_from_batch: PrepDish[]
+}
+
+export interface PrepDayCard {
+  date: string
+  weekday_label: string
+  prep_session: BentoPrepSession | null
+  dinner: PrepDayMeal | null
+  lunch_fresh: PrepDayMeal | null
+  lunch_is_bento: boolean
+}
+
+export interface PrepPlan {
+  week_start_date: string
+  rice_cup_assumption_g: number
+  days: PrepDayCard[]
+}
+
+export interface AddDishPayload {
+  meal_date: string
+  meal_type: MealType
+  recipe_id: number
+  user_id?: number | null
+}
+
+export interface RebalanceDayPayload {
+  meal_date: string
 }
 
 export interface GenerateMealPlanPayload {

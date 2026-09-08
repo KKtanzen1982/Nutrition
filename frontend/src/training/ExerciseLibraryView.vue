@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watchEffect } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AddExerciseItemModal from './AddExerciseItemModal.vue'
 import ExerciseItemDetailModal from './ExerciseItemDetailModal.vue'
 import TemplateFormModal from './TemplateFormModal.vue'
@@ -23,6 +23,7 @@ const error = ref<string | null>(null)
 
 const categoryFilter = ref('')
 const muscleGroupFilter = ref('')
+const nameQuery = ref('')
 
 const categoryOptions = computed(() => (activeTab.value === 'gym' ? GYM_CATEGORIES : YOGA_TYPES))
 const muscleGroupOptions = computed(() => {
@@ -33,17 +34,16 @@ const muscleGroupOptions = computed(() => {
   return [...groups].sort()
 })
 
-async function load() {
+// 動作資料庫（健身房/瑜珈拉伸動作庫）是所有人共用的一份資料，跟目前選的是哪位使用者無關，
+// 所以載入時不帶 user_id（不依個人使用頻率排序）。範本才是每位使用者各自的，仍需依 activeUser 載入。
+async function loadItems() {
   loading.value = true
   error.value = null
   categoryFilter.value = ''
   muscleGroupFilter.value = ''
+  nameQuery.value = ''
   try {
-    if (activeTab.value === 'templates') {
-      if (activeUser.value) templates.value = await fetchWorkoutTemplates(activeUser.value.id)
-    } else {
-      items.value = await listExerciseItems(activeTab.value, undefined, activeUser.value?.id ?? undefined)
-    }
+    items.value = await listExerciseItems(activeTab.value as ExerciseItemType)
   } catch (e) {
     error.value = e instanceof Error ? e.message : '讀取失敗'
   } finally {
@@ -51,21 +51,46 @@ async function load() {
   }
 }
 
-watchEffect(() => {
-  activeTab.value
-  activeUser.value
-  load()
+async function loadTemplates() {
+  if (!activeUser.value) {
+    templates.value = []
+    return
+  }
+  loading.value = true
+  error.value = null
+  try {
+    templates.value = await fetchWorkoutTemplates(activeUser.value.id)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '讀取失敗'
+  } finally {
+    loading.value = false
+  }
+}
+
+watch(
+  activeTab,
+  () => {
+    if (activeTab.value === 'templates') loadTemplates()
+    else loadItems()
+  },
+  { immediate: true },
+)
+
+watch(activeUser, () => {
+  if (activeTab.value === 'templates') loadTemplates()
 })
 
 function subLabel(item: ExerciseItemLibraryEntry): string {
   return 'category' in item ? item.category : item.type
 }
 
-const filteredItems = computed(() =>
-  items.value
+const filteredItems = computed(() => {
+  const query = nameQuery.value.trim().toLowerCase()
+  return items.value
     .filter((item) => !categoryFilter.value || subLabel(item) === categoryFilter.value)
-    .filter((item) => !muscleGroupFilter.value || ('muscle_group' in item && item.muscle_group === muscleGroupFilter.value)),
-)
+    .filter((item) => !muscleGroupFilter.value || ('muscle_group' in item && item.muscle_group === muscleGroupFilter.value))
+    .filter((item) => !query || item.item_name.toLowerCase().includes(query))
+})
 
 const groups = computed(() => {
   const map = new Map<string, ExerciseItemLibraryEntry[]>()
@@ -163,6 +188,12 @@ function onTemplateDeleted(templateId: number) {
     </div>
 
     <div v-if="activeTab !== 'templates'" class="mt-3 flex flex-wrap gap-2">
+      <input
+        v-model="nameQuery"
+        type="text"
+        placeholder="搜尋動作名稱…"
+        class="min-w-0 flex-1 rounded border border-ink/15 bg-bg px-2 py-1 text-xs text-ink sm:flex-none sm:w-48"
+      />
       <select v-model="categoryFilter" class="rounded border border-ink/15 bg-bg px-2 py-1 text-xs text-ink">
         <option value="">全部分類</option>
         <option v-for="c in categoryOptions" :key="c" :value="c">{{ c }}</option>

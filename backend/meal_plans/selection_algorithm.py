@@ -2,8 +2,8 @@
 ================================================
 純函式，dict 進 dict 出，同步呼叫。設計依據見 plan §4.3。
 
-簡化說明（相對原規劃文件）：「可選副食」的隨機觸發拿掉了，固定用主食40%+肉40%+菜20%，
-理由是隨機性會讓「同輸入跑兩次結果一致」這個可測性要求變複雜，而這個簡化不影響核心邏輯
+簡化說明（相對原規劃文件）：「可選副食」的隨機觸發拿掉了，固定用主食/肉/菜（+湯，當天有安排時）的
+固定比例，理由是隨機性會讓「同輸入跑兩次結果一致」這個可測性要求變複雜，而這個簡化不影響核心邏輯
 （熱量/蛋白質貼合、不重複上限、成本比例）。之後想加可選副食，在 build_day_meals 的
 LUNCH_DINNER_CATEGORIES 常數旁加邏輯即可。
 """
@@ -13,8 +13,24 @@ from typing import List, Dict, Optional, Set, Tuple
 
 MEAL_SHARES = {"breakfast": 0.20, "lunch": 0.35, "dinner": 0.35, "afternoon_snack": 0.10}
 LUNCH_DINNER_CATEGORIES = [("主食", 0.4), ("肉", 0.4), ("菜", 0.2)]
+LUNCH_DINNER_CATEGORIES_WITH_SOUP = [("主食", 0.35), ("肉", 0.35), ("菜", 0.15), ("湯", 0.15)]
 SERVING_SCALE_MIN, SERVING_SCALE_MAX = 0.6, 1.6
-MAX_RECIPE_REUSE = 2
+
+# 候選4：重複次數上限依候選池大小動態調整——池子夠大就不需要靠「反正吃完 2 次都還能選」撐候選池
+MAX_RECIPE_REUSE_LARGE_POOL = 1
+MAX_RECIPE_REUSE_SMALL_POOL = 2
+LARGE_POOL_THRESHOLD = 12
+
+FAVORITE_BONUS = 0.12  # 候選3：最愛清單軟性加權，從分數中扣掉，讓最愛食譜比較容易勝出但不保證
+CARB_SOURCE_REPEAT_PENALTY = 0.12  # 候選1：主食類昨天用過的碳水來源今天扣分
+
+# 整週菜色多樣性上限：這幾個類別一週最多出現幾種「不同」食譜（不是次數上限，是種類上限）。
+# 一旦某類別已經用滿上限種類，候選池會限縮成只剩已經用過的那幾種，之後只在這幾種裡面選。
+CATEGORY_VARIETY_CAP = {"肉": 3, "菜": 5, "下午茶": 2}
+
+
+def get_max_reuse(pool_size: int) -> int:
+    return MAX_RECIPE_REUSE_LARGE_POOL if pool_size >= LARGE_POOL_THRESHOLD else MAX_RECIPE_REUSE_SMALL_POOL
 
 
 def scale_recipe(recipe: Dict, target_calories: float) -> Dict:
@@ -34,12 +50,26 @@ def scale_recipe(recipe: Dict, target_calories: float) -> Dict:
 
 def select_recipe_for_slot(candidates: List[Dict], category: str, target_calories: float, target_protein: float,
                             usage_counter: Dict[int, int], cost_counter: Dict[str, int],
-                            yesterday_recipe_ids: Set[int]) -> Optional[Dict]:
+                            yesterday_recipe_ids: Set[int], favorite_recipe_ids: Optional[Set[int]] = None,
+                            yesterday_carb_sources: Optional[Set[str]] = None,
+                            weekly_variety: Optional[Dict[str, Set[int]]] = None) -> Optional[Dict]:
     pool = [r for r in candidates if r["category"] == category]
     if not pool:
         return None
+    favorite_recipe_ids = favorite_recipe_ids or set()
+    yesterday_carb_sources = yesterday_carb_sources or set()
 
-    not_capped = [r for r in pool if usage_counter.get(r["id"], 0) < MAX_RECIPE_REUSE]
+    variety_cap = CATEGORY_VARIETY_CAP.get(category)
+    used_variety = None
+    if variety_cap is not None and weekly_variety is not None:
+        used_variety = weekly_variety.setdefault(category, set())
+        if len(used_variety) >= variety_cap:
+            restricted = [r for r in pool if r["id"] in used_variety]
+            if restricted:
+                pool = restricted
+
+    max_reuse = get_max_reuse(len(pool))
+    not_capped = [r for r in pool if usage_counter.get(r["id"], 0) < max_reuse]
     pool = not_capped or pool
 
     low_count = cost_counter.get("低", 0)
@@ -55,24 +85,49 @@ def select_recipe_for_slot(candidates: List[Dict], category: str, target_calorie
         cal_diff = abs(scaled["calories"] - target_calories) / max(target_calories, 1)
         protein_diff = abs(scaled["protein_g"] - target_protein) / max(target_protein, 1)
         score = cal_diff + 0.5 * protein_diff
-        penalty = 0.15 if r["id"] in yesterday_recipe_ids else 0.0
-        scored.append((score + penalty, usage_counter.get(r["id"], 0), r["id"], r))
+        if r["id"] in yesterday_recipe_ids:
+            score += 0.15
+        if category == "主食" and r.get("carb_source") and r["carb_source"] in yesterday_carb_sources:
+            score += CARB_SOURCE_REPEAT_PENALTY
+        if r["id"] in favorite_recipe_ids:
+            score -= FAVORITE_BONUS
+        scored.append((score, usage_counter.get(r["id"], 0), r["id"], r))
     scored.sort(key=lambda t: (t[0], t[1], t[2]))
     chosen = scored[0][3]
 
     usage_counter[chosen["id"]] = usage_counter.get(chosen["id"], 0) + 1
     cost_counter[chosen["cost_level"]] = cost_counter.get(chosen["cost_level"], 0) + 1
+    if used_variety is not None:
+        used_variety.add(chosen["id"])
     return chosen
 
 
 def build_day_meals(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dict, meal_date,
                      usage_counter: Dict[int, int], cost_counter: Dict[str, int],
-                     yesterday_recipe_ids: Set[int], fixed_meals: Optional[Set[Tuple[str, str]]] = None
-                     ) -> Tuple[List[Dict], Set[int]]:
-    """fixed_meals: {(meal_type, 'A'|'B')} 這組不重新產生，重推整天時用。"""
+                     yesterday_recipe_ids: Set[int], fixed_meals: Optional[Set[Tuple[str, str]]] = None,
+                     preferred_recipes: Optional[Dict[Tuple[str, str], Dict]] = None,
+                     favorite_recipe_ids: Optional[Set[int]] = None,
+                     yesterday_carb_sources: Optional[Set[str]] = None,
+                     include_soup: bool = False,
+                     weekly_variety: Optional[Dict[str, Set[int]]] = None
+                     ) -> Tuple[List[Dict], Set[int], Set[str]]:
+    """fixed_meals: {(meal_type, 'A'|'B')} 這組不重新產生，重推整天時用。
+    preferred_recipes: {(meal_type, 'A'|'B'): candidate_dict} 使用者固定吃的餐點（見 FixedMealPreference），
+    直接套用這份食譜、只依當天熱量目標調整份量，不跑選餐演算法、也不占用重複次數/成本比例的名額。
+    favorite_recipe_ids: 兩人最愛清單的聯集，選餐評分時軟性加權。
+    yesterday_carb_sources: 昨天午餐+晚餐用過的主食碳水來源（飯/麵/其他），今天主食選餐時扣分避免連續重複。
+    include_soup: 這天午餐/晚餐要不要多排一道湯（湯天由 SoupDayPreference 決定，兩人任一人勾選即算）。
+    weekly_variety: 整週跨天累積的「肉/菜/下午茶已用過哪些食譜 id」，見 CATEGORY_VARIETY_CAP，
+    呼叫端要用同一個 dict 物件跨整週傳入（會被原地修改），這樣才能累積整週上限。
+    回傳 (meals, today_recipe_ids, today_carb_sources)。"""
     fixed_meals = fixed_meals or set()
+    preferred_recipes = preferred_recipes or {}
+    favorite_recipe_ids = favorite_recipe_ids or set()
+    yesterday_carb_sources = yesterday_carb_sources or set()
+    weekly_variety = weekly_variety if weekly_variety is not None else {}
     meals: List[Dict] = []
     today_recipe_ids: Set[int] = set()
+    today_carb_sources: Set[str] = set()
 
     for user_key, ctx in (("A", user_a_ctx), ("B", user_b_ctx)):
         for meal_type, category in (("breakfast", "早餐"), ("afternoon_snack", "下午茶")):
@@ -81,44 +136,66 @@ def build_day_meals(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dict, 
             share = MEAL_SHARES[meal_type]
             target_cal = ctx["daily_calories_target"] * share
             target_protein = ctx["daily_protein_g"] * share
-            recipe = select_recipe_for_slot(candidates, category, target_cal, target_protein,
-                                             usage_counter, cost_counter, yesterday_recipe_ids)
+
+            preferred = preferred_recipes.get((meal_type, user_key))
+            if preferred:
+                recipe = preferred
+            else:
+                recipe = select_recipe_for_slot(candidates, category, target_cal, target_protein,
+                                                 usage_counter, cost_counter, yesterday_recipe_ids,
+                                                 favorite_recipe_ids, weekly_variety=weekly_variety)
             if not recipe:
                 continue
             scaled = scale_recipe(recipe, target_cal)
             meals.append({"meal_date": meal_date, "meal_type": meal_type, "user": user_key, "category": category, **scaled})
             today_recipe_ids.add(recipe["id"])
 
+    categories = LUNCH_DINNER_CATEGORIES_WITH_SOUP if include_soup else LUNCH_DINNER_CATEGORIES
     for meal_type in ("lunch", "dinner"):
         if (meal_type, "A") in fixed_meals or (meal_type, "B") in fixed_meals:
             continue
         share = MEAL_SHARES[meal_type]
         avg_cal = (user_a_ctx["daily_calories_target"] + user_b_ctx["daily_calories_target"]) / 2 * share
         max_protein = max(user_a_ctx["daily_protein_g"], user_b_ctx["daily_protein_g"]) * share
-        for category, cat_share in LUNCH_DINNER_CATEGORIES:
+        for category, cat_share in categories:
             slot_cal = avg_cal * cat_share
             slot_protein = max_protein * cat_share
             recipe = select_recipe_for_slot(candidates, category, slot_cal, slot_protein,
-                                             usage_counter, cost_counter, yesterday_recipe_ids)
+                                             usage_counter, cost_counter, yesterday_recipe_ids,
+                                             favorite_recipe_ids, yesterday_carb_sources, weekly_variety)
             if not recipe:
                 continue
             today_recipe_ids.add(recipe["id"])
+            if category == "主食" and recipe.get("carb_source"):
+                today_carb_sources.add(recipe["carb_source"])
             for user_key, ctx in (("A", user_a_ctx), ("B", user_b_ctx)):
                 user_target_cal = ctx["daily_calories_target"] * share * cat_share
                 scaled = scale_recipe(recipe, user_target_cal)
                 meals.append({"meal_date": meal_date, "meal_type": meal_type, "user": user_key, "category": category, **scaled})
 
-    return meals, today_recipe_ids
+    return meals, today_recipe_ids, today_carb_sources
 
 
-def generate_week_plan(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dict, week_start_date) -> List[Dict]:
+def generate_week_plan(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dict, week_start_date,
+                        preferred_recipes: Optional[Dict[Tuple[str, str], Dict]] = None,
+                        favorite_recipe_ids: Optional[Set[int]] = None,
+                        soup_days: Optional[Set[int]] = None) -> List[Dict]:
     usage_counter: Dict[int, int] = {}
     cost_counter: Dict[str, int] = {}
     yesterday_ids: Set[int] = set()
+    yesterday_carb_sources: Set[str] = set()
+    weekly_variety: Dict[str, Set[int]] = {}
+    soup_days = soup_days or set()
     days = []
     for i in range(7):
         d = week_start_date + timedelta(days=i)
-        meals, today_ids = build_day_meals(candidates, user_a_ctx, user_b_ctx, d, usage_counter, cost_counter, yesterday_ids)
+        meals, today_ids, today_carb_sources = build_day_meals(
+            candidates, user_a_ctx, user_b_ctx, d, usage_counter, cost_counter, yesterday_ids,
+            preferred_recipes=preferred_recipes, favorite_recipe_ids=favorite_recipe_ids,
+            yesterday_carb_sources=yesterday_carb_sources, include_soup=d.weekday() in soup_days,
+            weekly_variety=weekly_variety,
+        )
         days.append({"date": d, "meals": meals})
         yesterday_ids = today_ids
+        yesterday_carb_sources = today_carb_sources
     return days

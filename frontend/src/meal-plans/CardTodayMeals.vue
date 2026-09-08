@@ -6,11 +6,18 @@ import { toISODate, today } from '../shared/date_utils'
 import type { MealPlanDetail } from '../shared/types'
 
 const MEAL_SLOTS_PER_DAY = 4
+const MEAL_TYPE_ORDER = ['breakfast', 'lunch', 'afternoon_snack', 'dinner']
 const MEAL_TYPE_LABELS: Record<string, string> = {
   breakfast: '早餐',
   lunch: '午餐',
   afternoon_snack: '下午茶',
   dinner: '晚餐',
+}
+const MEAL_TYPE_ICONS: Record<string, string> = {
+  breakfast: '🌅',
+  lunch: '🍚',
+  afternoon_snack: '🍵',
+  dinner: '🌙',
 }
 
 const props = defineProps<{ planId: number | null; userId: number }>()
@@ -50,6 +57,21 @@ const todayMeals = computed(() => {
 const todayMealTypeCount = computed(() => new Set(todayMeals.value.map((m) => m.meal_type)).size)
 
 const progressPct = computed(() => Math.min(100, Math.round((todayMealTypeCount.value / MEAL_SLOTS_PER_DAY) * 100)))
+
+interface MealTypeGroup {
+  type: string
+  label: string
+  icon: string
+  dishNames: string
+}
+
+const todayMealGroups = computed<MealTypeGroup[]>(() => {
+  return MEAL_TYPE_ORDER.map((type) => {
+    const names = [...new Set(todayMeals.value.filter((m) => m.meal_type === type).map((m) => m.recipe_name))]
+    if (names.length === 0) return null
+    return { type, label: MEAL_TYPE_LABELS[type] ?? type, icon: MEAL_TYPE_ICONS[type] ?? '🍽️', dishNames: names.join('・') }
+  }).filter((g): g is MealTypeGroup => g !== null)
+})
 </script>
 
 <template>
@@ -64,11 +86,16 @@ const progressPct = computed(() => Math.min(100, Math.round((todayMealTypeCount.
     <p class="font-serif text-4xl leading-none text-ink">
       {{ todayMealTypeCount }}<small class="text-base text-tea">/{{ MEAL_SLOTS_PER_DAY }} 餐</small>
     </p>
-    <p class="mt-2 text-xs text-tea">
-      {{ todayMeals.map((m) => `${MEAL_TYPE_LABELS[m.meal_type] ?? m.meal_type}．${m.recipe_name}`).join('、') || '尚未安排' }}
-    </p>
     <div class="mt-3 h-[3px] overflow-hidden rounded-full bg-accent-tint">
       <span class="block h-full rounded-full bg-accent" :style="{ width: `${progressPct}%` }" />
+    </div>
+    <div v-if="todayMealGroups.length" class="mt-3 space-y-1.5">
+      <div v-for="g in todayMealGroups" :key="g.type" class="rounded-lg bg-accent-tint/40 px-2.5 py-1.5">
+        <p class="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-tea">
+          <span aria-hidden="true">{{ g.icon }}</span>{{ g.label }}
+        </p>
+        <p class="mt-0.5 text-xs text-ink">{{ g.dishNames }}</p>
+      </div>
     </div>
   </CardShell>
 </template>

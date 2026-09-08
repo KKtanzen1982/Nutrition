@@ -8,12 +8,13 @@ from training.schemas import (
     WorkoutTemplateCreate, WorkoutTemplateUpdate, WorkoutTemplateResponse,
     ExerciseItemLibraryCreate, ExerciseItemLibraryUpdate,
     TrainingProgramCreate, TrainingScheduleCreate, TrainingScheduleUpdate,
-    TrainingScheduleLinkActual, TrainingTargetsUpdate,
+    TrainingScheduleLinkActual, TrainingTargetsUpdate, NotionScheduleItem,
 )
 from training.services import (
     TemplateService, exercise_item_service,
     TrainingProgramService, TrainingScheduleService, TrainingTargetService, TrainingProgressService,
 )
+from training import notion_export
 
 router = APIRouter(tags=["training"])
 
@@ -195,6 +196,41 @@ def delete_training_schedule(schedule_id: int, db: Session = Depends(get_db)):
 def list_training_schedule(user_id: int, month: str, db: Session = Depends(get_db)):
     """取得該月所有排程，給月曆畫面一次渲染；month 格式 YYYY-MM"""
     return training_schedule_service.list_schedule(db, user_id, month)
+
+
+@router.post("/training-schedule/sync-notion")
+def sync_training_schedule_to_notion(items: List[NotionScheduleItem], db: Session = Depends(get_db)):
+    """把訓練排程一筆一筆寫進 Notion 資料庫，訓練項目明細（動作/組數次數或時長）一起帶過去；
+    需要在後端 .env 設定 NOTION_TOKEN / NOTION_DATABASE_ID"""
+    entries = []
+    for item in items:
+        schedule = training_schedule_service.get_schedule(db, item.schedule_id)
+        if not schedule:
+            continue
+        template = template_service.get_template(db, schedule["workout_template_id"])
+        entries.append({
+            "id": schedule["id"],
+            "scheduled_date": schedule["scheduled_date"].isoformat(),
+            "program_name": schedule["program_name"],
+            "day_label": schedule["day_label"],
+            "exercise_type": template.exercise_type if template else "",
+            "duration_min": template.duration_min if template else None,
+            "details": [
+                {
+                    "exercise_name": d.exercise_name,
+                    "sets": d.sets,
+                    "reps": d.reps,
+                    "weight_kg": d.weight_kg,
+                    "duration_min": d.duration_min,
+                }
+                for d in (template.details if template else [])
+            ],
+        })
+
+    try:
+        return notion_export.push_schedule_entries(entries)
+    except notion_export.NotionNotConfiguredError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/training-schedule/{schedule_id}")

@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiPut } from '../shared/http'
+import { apiDelete, apiGet, apiPost, apiPut } from '../shared/http'
 import { toISODate } from '../shared/date_utils'
 import type {
   CreateDailyStepsPayload,
@@ -6,6 +6,7 @@ import type {
   DailyStepsRecord,
   ExerciseSession,
   UpdateDailyStepsPayload,
+  UpdateExerciseSessionPayload,
 } from '../shared/types'
 
 export function fetchExerciseSessions(userId: number, dateStart: Date, dateEnd: Date): Promise<ExerciseSession[]> {
@@ -18,6 +19,14 @@ export function fetchExerciseSessions(userId: number, dateStart: Date, dateEnd: 
 
 export function createExerciseSession(payload: CreateExerciseSessionPayload): Promise<ExerciseSession> {
   return apiPost<ExerciseSession>('/exercise-sessions', payload)
+}
+
+export function updateExerciseSession(sessionId: number, payload: UpdateExerciseSessionPayload): Promise<ExerciseSession> {
+  return apiPut<ExerciseSession>(`/exercise-sessions/${sessionId}`, payload)
+}
+
+export function deleteExerciseSession(sessionId: number): Promise<{ success: boolean }> {
+  return apiDelete(`/exercise-sessions/${sessionId}`)
 }
 
 export function fetchDailySteps(userId: number, dateStart: Date, dateEnd: Date): Promise<DailyStepsRecord[]> {
@@ -34,4 +43,8 @@ export function createDailyStepsRecord(payload: CreateDailyStepsPayload): Promis
 
 export function updateDailyStepsRecord(recordId: number, payload: UpdateDailyStepsPayload): Promise<DailyStepsRecord> {
   return apiPut<DailyStepsRecord>(`/daily-steps/${recordId}`, payload)
+}
+
+export function deleteDailyStepsRecord(recordId: number): Promise<{ success: boolean }> {
+  return apiDelete(`/daily-steps/${recordId}`)
 }

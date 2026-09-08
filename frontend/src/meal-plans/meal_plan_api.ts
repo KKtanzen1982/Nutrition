@@ -1,9 +1,11 @@
-import { apiGet, apiPost, apiPut } from '../shared/http'
+import { apiDelete, apiGet, apiPost, apiPut } from '../shared/http'
 import type {
+  AddDishPayload,
   AdjustServingWeightPayload,
   ConfirmMealPlanResponse,
   GenerateMealPlanPayload,
   MealPlanDetail,
+  RebalanceDayPayload,
   RegenerateDayPayload,
   ReplaceMealPayload,
   SearchAndReplacePayload,
@@ -35,4 +37,16 @@ export function searchAndReplaceMeal(planId: number, payload: SearchAndReplacePa
 
 export function adjustServingWeight(planId: number, payload: AdjustServingWeightPayload): Promise<MealPlanDetail> {
   return apiPut(`/meal-plans/${planId}/adjust/serving-weight`, payload)
+}
+
+export function addDish(planId: number, payload: AddDishPayload): Promise<MealPlanDetail> {
+  return apiPost(`/meal-plans/${planId}/adjust/add-dish`, payload)
+}
+
+export function removeDish(planId: number, mealId: number): Promise<MealPlanDetail> {
+  return apiDelete(`/meal-plans/${planId}/adjust/dish/${mealId}`)
+}
+
+export function rebalanceDay(planId: number, payload: RebalanceDayPayload): Promise<MealPlanDetail> {
+  return apiPost(`/meal-plans/${planId}/adjust/rebalance-day`, payload)
 }
