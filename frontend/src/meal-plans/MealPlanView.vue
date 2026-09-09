@@ -398,6 +398,28 @@ watchEffect(() => {
   if (userA.value) loadOtherPlans()
 })
 
+// 同一天可能因為「整週重新推薦」留下好幾筆紀錄，依產生順序（id 由小到大）標上序號，
+// 方便分辨「這是第幾份」；只有同一天真的有 2 筆以上才會顯示序號，單筆不用特別標。
+const otherPlansWithSeq = computed(() => {
+  const byDate = new Map<string, MealPlanSummary[]>()
+  for (const p of otherPlans.value) {
+    if (!byDate.has(p.plan_date)) byDate.set(p.plan_date, [])
+    byDate.get(p.plan_date)!.push(p)
+  }
+  const seqById = new Map<number, { seq: number; total: number }>()
+  for (const group of byDate.values()) {
+    const sorted = [...group].sort((a, b) => a.id - b.id)
+    sorted.forEach((p, i) => seqById.set(p.id, { seq: i + 1, total: sorted.length }))
+  }
+  return otherPlans.value.map((p) => ({ ...p, ...(seqById.get(p.id) ?? { seq: 1, total: 1 }) }))
+})
+
+const currentPlanSeq = computed(() => {
+  if (!plan.value) return null
+  const match = otherPlansWithSeq.value.find((p) => p.id === plan.value!.id)
+  return match && match.total > 1 ? match : null
+})
+
 function switchToPlan(planId: number) {
   setCurrentMealPlanId(planId)
   showWeekPicker.value = false
@@ -1038,7 +1060,10 @@ function toggleDiffExpanded(date: string) {
         <div class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-ink/10 bg-surface p-4">
           <div>
             <div class="relative flex items-center gap-2">
-              <h1 class="font-serif text-2xl text-ink">{{ plan.plan_date }} 那一週</h1>
+              <h1 class="font-serif text-2xl text-ink">
+                {{ plan.plan_date }} 那一週
+                <span v-if="currentPlanSeq" class="text-lg text-tea">（第 {{ currentPlanSeq.seq }}／{{ currentPlanSeq.total }} 份）</span>
+              </h1>
               <button
                 type="button"
                 class="rounded-full border border-ink/15 px-2.5 py-1 text-xs font-semibold text-ink hover:bg-bg"
@@ -1054,13 +1079,14 @@ function toggleDiffExpanded(date: string) {
                 <p v-if="otherPlansLoading" class="px-2 py-1 text-xs text-tea">載入中…</p>
                 <p v-else-if="otherPlans.length === 0" class="px-2 py-1 text-xs text-tea">還沒有其他週的紀錄</p>
                 <div
-                  v-for="p in otherPlans"
+                  v-for="p in otherPlansWithSeq"
                   :key="p.id"
                   class="flex w-full items-center justify-between rounded-lg px-2 py-1 text-sm"
                   :class="p.id === plan.id ? 'bg-accent-tint text-ink' : 'text-ink hover:bg-bg'"
                 >
                   <button type="button" class="min-w-0 flex-1 py-0.5 text-left" @click="switchToPlan(p.id)">
                     <span>{{ p.plan_date }}</span>
+                    <span v-if="p.total > 1" class="ml-1 text-xs font-semibold text-accent">#{{ p.seq }}</span>
                     <span class="ml-1 text-xs text-tea">{{ p.plan_status }}</span>
                   </button>
                   <button
