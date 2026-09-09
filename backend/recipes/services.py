@@ -161,6 +161,20 @@ class RecipeService:
         db.refresh(recipe)
         return recipe
 
+    def replace_ingredients(self, db: Session, recipe_id: int, ingredients: List[Dict]) -> Optional[Recipe]:
+        """整組取代食材清單（跟 add_recipe_steps 版本邏輯一致的做法，但食材沒有版本歷史，直接覆蓋）"""
+        recipe = db.get(Recipe, recipe_id)
+        if not recipe:
+            return None
+        db.query(RecipeIngredient).filter(RecipeIngredient.recipe_id == recipe_id).delete()
+        for ing in ingredients:
+            db.add(RecipeIngredient(recipe_id=recipe_id, **ing))
+        recipe.last_updated_at = datetime.utcnow()
+        db.commit()
+        self.calculate_nutrition(db, recipe_id)
+        db.refresh(recipe)
+        return recipe
+
     def soft_delete_recipe(self, db: Session, recipe_id: int) -> bool:
         recipe = db.get(Recipe, recipe_id)
         if not recipe:

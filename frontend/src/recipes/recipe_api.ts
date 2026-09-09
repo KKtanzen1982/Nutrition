@@ -1,5 +1,6 @@
 import { apiDelete, apiGet, apiPost, apiPut } from '../shared/http'
 import type {
+  CreateRecipeIngredientPayload,
   CreateRecipePayload,
   CreateRecipeStepPayload,
   NutritionCalculationResult,
@@ -33,6 +34,10 @@ export function createRecipe(payload: CreateRecipePayload): Promise<RecipeDetail
 
 export function updateRecipe(recipeId: number, payload: UpdateRecipePayload): Promise<RecipeDetail> {
   return apiPut(`/recipes/${recipeId}`, payload)
+}
+
+export function updateRecipeIngredients(recipeId: number, ingredients: CreateRecipeIngredientPayload[]): Promise<RecipeDetail> {
+  return apiPut(`/recipes/${recipeId}/ingredients`, ingredients)
 }
 
 export function deleteRecipe(recipeId: number): Promise<void> {

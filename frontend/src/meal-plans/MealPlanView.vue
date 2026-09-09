@@ -3,6 +3,7 @@ import { computed, ref, watchEffect } from 'vue'
 import {
   addDish,
   confirmMealPlan,
+  deleteMealPlan,
   fetchMealPlan,
   generateMealPlan,
   listMealPlans,
@@ -402,6 +403,28 @@ function switchToPlan(planId: number) {
   showWeekPicker.value = false
 }
 
+const deletingPlanId = ref<number | null>(null)
+
+async function deletePlan(planId: number, planDateLabel: string) {
+  const ok = await confirmDialog(`確定要刪除「${planDateLabel} 那一週」的推薦嗎？這個操作無法復原。`)
+  if (!ok) return
+  deletingPlanId.value = planId
+  generateError.value = null
+  try {
+    await deleteMealPlan(planId)
+    otherPlans.value = otherPlans.value.filter((p) => p.id !== planId)
+    if (plan.value?.id === planId) {
+      const next = otherPlans.value[0] ?? null
+      setCurrentMealPlanId(next?.id ?? null)
+      if (!next) plan.value = null
+    }
+  } catch (e) {
+    generateError.value = e instanceof Error ? e.message : '刪除失敗，請稍後再試'
+  } finally {
+    deletingPlanId.value = null
+  }
+}
+
 const regeneratingDay = ref<string | null>(null)
 const adjustError = ref<string | null>(null)
 
@@ -471,7 +494,10 @@ function mealEditorDishes(): MealDetail[] {
   const { date, mealType } = mealEditor.value
   const day = plan.value.days.find((d) => d.date === date)
   if (!day) return []
-  return day.meals.filter((m) => m.meal_type === mealType)
+  return day.meals
+    .filter((m) => m.meal_type === mealType)
+    .slice()
+    .sort((a, b) => a.recipe_name.localeCompare(b.recipe_name, 'zh-Hant'))
 }
 
 function startReplaceDish(mealId: number) {
@@ -1027,17 +1053,25 @@ function toggleDiffExpanded(date: string) {
               >
                 <p v-if="otherPlansLoading" class="px-2 py-1 text-xs text-tea">載入中…</p>
                 <p v-else-if="otherPlans.length === 0" class="px-2 py-1 text-xs text-tea">還沒有其他週的紀錄</p>
-                <button
+                <div
                   v-for="p in otherPlans"
                   :key="p.id"
-                  type="button"
-                  class="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-sm hover:bg-bg"
-                  :class="p.id === plan.id ? 'bg-accent-tint text-ink' : 'text-ink'"
-                  @click="switchToPlan(p.id)"
+                  class="flex w-full items-center justify-between rounded-lg px-2 py-1 text-sm"
+                  :class="p.id === plan.id ? 'bg-accent-tint text-ink' : 'text-ink hover:bg-bg'"
                 >
-                  <span>{{ p.plan_date }}</span>
-                  <span class="text-xs text-tea">{{ p.plan_status }}</span>
-                </button>
+                  <button type="button" class="min-w-0 flex-1 py-0.5 text-left" @click="switchToPlan(p.id)">
+                    <span>{{ p.plan_date }}</span>
+                    <span class="ml-1 text-xs text-tea">{{ p.plan_status }}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="shrink-0 pl-2 text-xs text-tea hover:text-alert disabled:opacity-40"
+                    :disabled="deletingPlanId === p.id"
+                    @click="deletePlan(p.id, p.plan_date)"
+                  >
+                    {{ deletingPlanId === p.id ? '刪除中…' : '刪除' }}
+                  </button>
+                </div>
               </div>
             </div>
             <p class="text-xs text-tea">

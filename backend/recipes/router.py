@@ -6,7 +6,7 @@ from database import get_db
 from recipes.models import IngredientLibrary, Recipe
 from recipes.schemas import (
     IngredientCreate, IngredientUpdate, IngredientStockUpdate, IngredientResponse, IngredientStockResponse,
-    RecipeCreate, RecipeUpdate, RecipeStepCreate, RecipeResponse,
+    RecipeCreate, RecipeUpdate, RecipeStepCreate, RecipeIngredientCreate, RecipeResponse,
 )
 from recipes.services import ingredient_service, recipe_service
 
@@ -103,6 +103,17 @@ def get_recipe(recipe_id: int, db: Session = Depends(get_db)):
 @router.put("/recipes/{recipe_id}", response_model=RecipeResponse)
 def update_recipe(recipe_id: int, payload: RecipeUpdate, db: Session = Depends(get_db)):
     recipe = recipe_service.update_recipe(db, recipe_id, payload)
+    if not recipe:
+        raise HTTPException(status_code=404, detail="食譜不存在")
+    return recipe
+
+
+@router.put("/recipes/{recipe_id}/ingredients", response_model=RecipeResponse)
+def update_recipe_ingredients(recipe_id: int, ingredients: List[RecipeIngredientCreate], db: Session = Depends(get_db)):
+    """整組取代食材清單，取代後自動重算營養素（跟建立食譜時的邏輯一致）"""
+    if len(ingredients) < 1:
+        raise HTTPException(status_code=400, detail="至少需要 1 種食材")
+    recipe = recipe_service.replace_ingredients(db, recipe_id, [i.model_dump() for i in ingredients])
     if not recipe:
         raise HTTPException(status_code=404, detail="食譜不存在")
     return recipe

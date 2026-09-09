@@ -10,6 +10,7 @@ from meal_plans.models import (
     WeeklyMealPlan, DailyMealDetail, MealAdjustment, FixedMealPreference,
     ExcludedRecipe, FavoriteRecipe, SoupDayPreference,
 )
+from shopping.models import ShoppingList
 from meal_plans.schemas import FIXED_MEAL_TYPES
 from meal_plans import nutrition_calc
 from meal_plans.selection_algorithm import generate_week_plan, build_day_meals, scale_recipe, MEAL_SHARES, CATEGORY_VARIETY_CAP
@@ -360,6 +361,18 @@ class MealPlanService:
             }
             for p in plans
         ]
+
+    def delete_plan(self, db: Session, plan_id: int) -> bool:
+        """刪除整週菜單：先清掉引用這個 plan_id 的調整紀錄／購物清單關聯，再刪 plan
+        （meals 是 cascade="all, delete-orphan" 會跟著刪，購物清單本身不刪，只是把來源參照設 null）"""
+        plan = db.get(WeeklyMealPlan, plan_id)
+        if not plan:
+            return False
+        db.query(MealAdjustment).filter(MealAdjustment.plan_id == plan_id).delete()
+        db.query(ShoppingList).filter(ShoppingList.created_from_plan_id == plan_id).update({"created_from_plan_id": None})
+        db.delete(plan)
+        db.commit()
+        return True
 
     def get_plan(self, db: Session, plan_id: int) -> Optional[Dict]:
         plan = db.get(WeeklyMealPlan, plan_id)

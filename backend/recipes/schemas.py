@@ -106,6 +106,7 @@ class RecipeIngredientResponse(BaseModel):
     quantity_g: float
     unit: str
     notes: Optional[str] = None
+    ingredient: Optional[IngredientResponse] = None  # 帶出食材名稱，避免前端只能顯示 ingredient_id
 
     class Config:
         from_attributes = True

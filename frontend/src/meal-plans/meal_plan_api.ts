@@ -24,6 +24,10 @@ export function fetchMealPlan(planId: number): Promise<MealPlanDetail> {
   return apiGet<MealPlanDetail>(`/meal-plans/${planId}`)
 }
 
+export function deleteMealPlan(planId: number): Promise<void> {
+  return apiDelete(`/meal-plans/${planId}`)
+}
+
 export function confirmMealPlan(planId: number): Promise<ConfirmMealPlanResponse> {
   return apiPost(`/meal-plans/${planId}/confirm`, {})
 }

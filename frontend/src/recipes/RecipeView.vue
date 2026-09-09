@@ -11,6 +11,7 @@ import {
   searchRecipesByName,
   setRecipeStepsAsCurrent,
   updateRecipe,
+  updateRecipeIngredients,
 } from './recipe_api'
 import { useConfirmDialog } from '../shared/useConfirmDialog'
 import type { IngredientSearchResult, RecipeDetail, RecipeListEntry, RecipeSearchResult } from '../shared/types'
@@ -19,6 +20,13 @@ const { confirmDialog } = useConfirmDialog()
 
 const RECIPE_CATEGORIES = ['早餐', '主食', '肉', '菜', '飲料', '點心']
 const COST_LEVELS = ['低', '中', '高']
+
+interface IngredientRow {
+  ingredient_id: number
+  ingredient_name: string
+  quantity_g: number | null
+  unit: string
+}
 
 const query = ref('')
 const categoryFilter = ref('')
@@ -206,6 +214,71 @@ async function submitEditBasic() {
   }
 }
 
+// ---- 編輯食材：整組取代（跟建立食譜時同一套搜尋加入 UI），儲存後後端會自動重算營養素 ----
+const editingIngredients = ref(false)
+const editIngredientRows = ref<IngredientRow[]>([])
+const editIngSearchQuery = ref('')
+const editIngSearchResults = ref<IngredientSearchResult[]>([])
+const editIngSearching = ref(false)
+const savingIngredients = ref(false)
+
+function startEditIngredients() {
+  if (!detail.value) return
+  editIngredientRows.value = detail.value.ingredients.map((ing) => ({
+    ingredient_id: ing.ingredient_id,
+    ingredient_name: ing.ingredient?.ingredient_name ?? `食材 #${ing.ingredient_id}`,
+    quantity_g: ing.quantity_g,
+    unit: ing.unit,
+  }))
+  editIngSearchQuery.value = ''
+  editIngSearchResults.value = []
+  editingIngredients.value = true
+}
+function cancelEditIngredients() {
+  editingIngredients.value = false
+}
+
+async function runEditIngredientSearch() {
+  if (!editIngSearchQuery.value.trim()) return
+  editIngSearching.value = true
+  try {
+    editIngSearchResults.value = await searchIngredientsByName(editIngSearchQuery.value.trim())
+  } catch {
+    editIngSearchResults.value = []
+  } finally {
+    editIngSearching.value = false
+  }
+}
+
+function addEditIngredientRow(ing: IngredientSearchResult) {
+  if (editIngredientRows.value.some((r) => r.ingredient_id === ing.id)) return
+  editIngredientRows.value.push({ ingredient_id: ing.id, ingredient_name: ing.ingredient_name, quantity_g: null, unit: ing.unit })
+}
+function removeEditIngredientRow(index: number) {
+  editIngredientRows.value.splice(index, 1)
+}
+
+const canSubmitEditIngredients = computed(
+  () => editIngredientRows.value.length > 0 && editIngredientRows.value.every((r) => r.quantity_g !== null),
+)
+
+async function submitEditIngredients() {
+  if (!detail.value || !canSubmitEditIngredients.value) return
+  savingIngredients.value = true
+  detailError.value = null
+  try {
+    detail.value = await updateRecipeIngredients(
+      detail.value.id,
+      editIngredientRows.value.map((r) => ({ ingredient_id: r.ingredient_id, quantity_g: r.quantity_g as number, unit: r.unit })),
+    )
+    editingIngredients.value = false
+  } catch (e) {
+    detailError.value = e instanceof Error ? e.message : '更新食材失敗'
+  } finally {
+    savingIngredients.value = false
+  }
+}
+
 const recalculating = ref(false)
 async function recalcNutrition() {
   if (!detail.value) return
@@ -233,12 +306,6 @@ async function removeRecipe() {
 }
 
 const showCreate = ref(false)
-interface IngredientRow {
-  ingredient_id: number
-  ingredient_name: string
-  quantity_g: number | null
-  unit: string
-}
 const createForm = reactive({
   recipe_name: '',
   category: RECIPE_CATEGORIES[0],
@@ -484,10 +551,58 @@ async function submitCreate() {
         </div>
 
         <div class="mt-4">
-          <p class="text-[11.5px] font-semibold uppercase tracking-wide text-muted">食材</p>
-          <ul class="mt-1 text-sm text-ink">
+          <div class="flex items-center justify-between">
+            <p class="text-[11.5px] font-semibold uppercase tracking-wide text-muted">食材</p>
+            <button v-if="!editingIngredients" type="button" class="text-xs font-semibold text-accent hover:text-accent-bright" @click="startEditIngredients">
+              編輯食材
+            </button>
+          </div>
+
+          <ul v-if="!editingIngredients" class="mt-1 text-sm text-ink">
             <li v-for="ing in detail.ingredients" :key="ing.id">{{ ing.ingredient?.ingredient_name ?? `食材 #${ing.ingredient_id}` }} · {{ ing.quantity_g }}{{ ing.unit }}</li>
           </ul>
+
+          <div v-else class="mt-2 rounded-lg border border-ink/10 bg-bg p-3">
+            <div class="flex gap-2">
+              <input
+                v-model="editIngSearchQuery"
+                type="text"
+                placeholder="搜尋食材名稱"
+                class="min-w-0 flex-1 rounded-lg border border-ink/15 bg-surface px-3 py-2 text-sm text-ink"
+                @keydown.enter="runEditIngredientSearch"
+              />
+              <button type="button" class="shrink-0 rounded-lg border border-ink/15 px-3 py-2 text-xs font-semibold text-ink hover:bg-surface" :disabled="editIngSearching" @click="runEditIngredientSearch">
+                {{ editIngSearching ? '搜尋中…' : '搜尋' }}
+              </button>
+            </div>
+            <ul v-if="editIngSearchResults.length" class="mt-2 divide-y divide-ink/10 rounded-lg border border-ink/10">
+              <li v-for="ing in editIngSearchResults" :key="ing.id" class="flex items-center justify-between px-3 py-1.5 text-sm">
+                <span class="text-ink">{{ ing.ingredient_name }}<span class="text-tea">（{{ ing.category }}）</span></span>
+                <button type="button" class="text-xs font-semibold text-accent hover:text-accent-bright" @click="addEditIngredientRow(ing)">加入</button>
+              </li>
+            </ul>
+            <div v-for="(row, i) in editIngredientRows" :key="row.ingredient_id" class="mt-2 flex items-center gap-2">
+              <span class="min-w-0 flex-1 truncate text-sm text-ink">{{ row.ingredient_name }}</span>
+              <input v-model.number="row.quantity_g" type="number" placeholder="用量" class="w-24 rounded border border-ink/15 bg-surface px-2 py-1 text-sm text-ink" />
+              <span class="text-xs text-tea">{{ row.unit }}</span>
+              <button type="button" class="text-xs text-tea hover:text-alert" @click="removeEditIngredientRow(i)">刪除</button>
+            </div>
+            <p v-if="editIngredientRows.length === 0" class="mt-2 text-xs text-tea">至少需要 1 種食材</p>
+
+            <div class="mt-3 flex gap-2">
+              <button
+                type="button"
+                class="flex-1 rounded-full bg-accent py-2 text-xs font-semibold text-on-accent hover:bg-accent-bright disabled:opacity-50"
+                :disabled="savingIngredients || !canSubmitEditIngredients"
+                @click="submitEditIngredients"
+              >
+                {{ savingIngredients ? '儲存中…' : '儲存食材' }}
+              </button>
+              <button type="button" class="rounded-full border border-ink/15 px-4 py-2 text-xs text-ink hover:bg-surface" @click="cancelEditIngredients">
+                取消
+              </button>
+            </div>
+          </div>
         </div>
 
         <div class="mt-4">

@@ -68,6 +68,8 @@ class RecipeIngredient(Base):
     unit = Column(String(20), default="g")
     notes = Column(Text, nullable=True)
 
+    ingredient = relationship("IngredientLibrary")
+
 
 class RecipeStep(Base):
     __tablename__ = "recipe_steps"

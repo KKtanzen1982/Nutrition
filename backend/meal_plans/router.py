@@ -141,6 +141,15 @@ def get_meal_plan(plan_id: int, db: Session = Depends(get_db)):
     return plan
 
 
+@router.delete("/meal-plans/{plan_id}", status_code=204)
+def delete_meal_plan(plan_id: int, db: Session = Depends(get_db)):
+    """刪除整週菜單（含每日餐點明細與調整紀錄），已生成的購物清單不會被刪，只是取消跟這份菜單的關聯"""
+    success = meal_plan_service.delete_plan(db, plan_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="計畫不存在")
+    return None
+
+
 @router.get("/meal-plans/{plan_id}/prep-plan")
 def get_prep_plan(plan_id: int, db: Session = Depends(get_db)):
     """備料規劃：週日整週肉類批次、週二/週四備便當、每日晚餐提示，含建議的備料步驟"""
