@@ -5,6 +5,7 @@ import {
   confirmMealPlan,
   fetchMealPlan,
   generateMealPlan,
+  listMealPlans,
   rebalanceDay,
   regenerateDay,
   removeDish,
@@ -16,11 +17,13 @@ import { addFavoriteRecipe, fetchFavoriteRecipes, removeFavoriteRecipe } from '.
 import { fetchSoupDays, setSoupDays } from './soup_day_preference_api'
 import { fetchPrepPlan } from './prep_plan_api'
 import { searchRecipesByName } from '../recipes/recipe_api'
+import { useConfirmDialog } from '../shared/useConfirmDialog'
 import { useHouseholdConfig } from '../shared/useHouseholdConfig'
+import { useLocalStorage } from '../shared/useLocalStorage'
 import { startOfWeekMonday, toISODate, today } from '../shared/date_utils'
 import type {
   DayMeals, ExcludedRecipe, FavoriteRecipe, FixedMealPreference, FixedMealType,
-  MealDetail, MealPlanDetail, MealType, PrepDayMeal, PrepPlan, RecipeSearchResult,
+  MealDetail, MealPlanDetail, MealPlanSummary, MealType, PrepDayMeal, PrepPlan, RecipeSearchResult,
 } from '../shared/types'
 
 const MEAL_TYPE_LABELS: Record<string, string> = {
@@ -33,6 +36,7 @@ const WEEKDAY_LABELS = ['週日', '週一', '週二', '週三', '週四', '週�
 const SOUP_WEEKDAY_LABELS = ['週一', '週二', '週三', '週四', '週五', '週六', '週日'] // 對應後端 day_of_week 0-6
 
 const { config, setCurrentMealPlanId, setCurrentShoppingListId } = useHouseholdConfig()
+const { confirmDialog } = useConfirmDialog()
 const users = computed(() => config.value.users)
 const hasTwoUsers = computed(() => users.value.length >= 2)
 const userA = computed(() => users.value[0] ?? null)
@@ -344,6 +348,60 @@ async function submitGenerate() {
   }
 }
 
+// ---- 整週重新推薦：等同再產生一次同一週的菜單（後端每次產生都是新的一筆，不會覆蓋），
+// 產生後直接切換過去看新結果 ----
+
+const regeneratingWeek = ref(false)
+
+async function submitRegenerateWeek() {
+  if (!plan.value || !userA.value || !userB.value) return
+  const ok = await confirmDialog(`確定要整週重新推薦「${plan.value.plan_date} 那一週」嗎？目前的安排（含你手動調整過的部分）不會被覆蓋，但畫面會切換到新產生的版本。`)
+  if (!ok) return
+  regeneratingWeek.value = true
+  generateError.value = null
+  try {
+    const result = await generateMealPlan({
+      week_start_date: plan.value.plan_date,
+      user_id_a: userA.value.id,
+      user_id_b: userB.value.id,
+    })
+    plan.value = result
+    setCurrentMealPlanId(result.id)
+    await loadOtherPlans()
+  } catch (e) {
+    generateError.value = e instanceof Error ? e.message : '整週重新推薦失敗，請稍後再試'
+  } finally {
+    regeneratingWeek.value = false
+  }
+}
+
+// ---- 查看其他週：後端每次「產生」都會留下一筆新紀錄，這裡列出兩人名下所有週菜單讓你切換查看 ----
+
+const otherPlans = ref<MealPlanSummary[]>([])
+const otherPlansLoading = ref(false)
+const showWeekPicker = ref(false)
+
+async function loadOtherPlans() {
+  if (!userA.value) return
+  otherPlansLoading.value = true
+  try {
+    otherPlans.value = await listMealPlans({ user_id: userA.value.id })
+  } catch {
+    // 週清單載入失敗不影響主要功能，靜默忽略即可
+  } finally {
+    otherPlansLoading.value = false
+  }
+}
+
+watchEffect(() => {
+  if (userA.value) loadOtherPlans()
+})
+
+function switchToPlan(planId: number) {
+  setCurrentMealPlanId(planId)
+  showWeekPicker.value = false
+}
+
 const regeneratingDay = ref<string | null>(null)
 const adjustError = ref<string | null>(null)
 
@@ -366,19 +424,42 @@ async function submitRegenerateDay(mealDate: string) {
 
 const mealEditor = ref<{ date: string; mealType: MealType } | null>(null)
 const mealEditorAddUserId = ref<number | null>(null)
-const mealEditorReplacingId = ref<number | null>(null)
+// 換菜目標：一般「換一道」是單一 mealId，多選後「換成…」是好幾個 mealId 一次套用同一個新食譜
+const mealEditorReplacingIds = ref<number[]>([])
 const mealEditorQuery = ref('')
 const mealEditorResults = ref<RecipeSearchResult[]>([])
 const mealEditorSearching = ref(false)
 const mealEditorBusy = ref(false)
 const rebalancingDay = ref<string | null>(null)
 
+// ---- 多選：勾選這一餐裡的好幾道菜，一次移除或一次換成同一道新食譜 ----
+const mealEditorSelected = ref<Set<number>>(new Set())
+
+function toggleMealEditorSelected(mealId: number) {
+  const next = new Set(mealEditorSelected.value)
+  if (next.has(mealId)) next.delete(mealId)
+  else next.add(mealId)
+  mealEditorSelected.value = next
+}
+function clearMealEditorSelection() {
+  mealEditorSelected.value = new Set()
+}
+
+// ---- 搜尋欄記住最近 5 筆查詢過的菜名，方便重複查同幾道菜 ----
+const recentMealSearches = useLocalStorage<string[]>('block7_meal_editor_recent_searches', [])
+function rememberMealSearch(query: string) {
+  const trimmed = query.trim()
+  if (!trimmed) return
+  recentMealSearches.value = [trimmed, ...recentMealSearches.value.filter((q) => q !== trimmed)].slice(0, 5)
+}
+
 function openMealEditor(date: string, mealType: MealType) {
   mealEditor.value = { date, mealType }
   mealEditorAddUserId.value = userA.value?.id ?? null
-  mealEditorReplacingId.value = null
+  mealEditorReplacingIds.value = []
   mealEditorQuery.value = ''
   mealEditorResults.value = []
+  clearMealEditorSelection()
   adjustError.value = null
 }
 function closeMealEditor() {
@@ -394,12 +475,18 @@ function mealEditorDishes(): MealDetail[] {
 }
 
 function startReplaceDish(mealId: number) {
-  mealEditorReplacingId.value = mealId
+  mealEditorReplacingIds.value = [mealId]
+  mealEditorQuery.value = ''
+  mealEditorResults.value = []
+}
+function startBulkReplace() {
+  if (mealEditorSelected.value.size === 0) return
+  mealEditorReplacingIds.value = [...mealEditorSelected.value]
   mealEditorQuery.value = ''
   mealEditorResults.value = []
 }
 function cancelReplaceDish() {
-  mealEditorReplacingId.value = null
+  mealEditorReplacingIds.value = []
 }
 
 async function runMealEditorSearch() {
@@ -408,6 +495,7 @@ async function runMealEditorSearch() {
   adjustError.value = null
   try {
     mealEditorResults.value = await searchRecipesByName(mealEditorQuery.value.trim())
+    rememberMealSearch(mealEditorQuery.value)
   } catch (e) {
     adjustError.value = e instanceof Error ? e.message : '搜尋失敗'
   } finally {
@@ -415,14 +503,23 @@ async function runMealEditorSearch() {
   }
 }
 
+function useRecentMealSearch(query: string) {
+  mealEditorQuery.value = query
+  runMealEditorSearch()
+}
+
 async function chooseMealEditorRecipe(recipeId: number) {
   if (!plan.value?.id || !mealEditor.value) return
   mealEditorBusy.value = true
   adjustError.value = null
   try {
-    if (mealEditorReplacingId.value !== null) {
-      plan.value = await replaceMeal(plan.value.id, { meal_id: mealEditorReplacingId.value, new_recipe_id: recipeId })
-      mealEditorReplacingId.value = null
+    if (mealEditorReplacingIds.value.length > 0) {
+      // 逐一套用同一個新食譜到每個選到的 mealId；換菜 API 是就地取代同一個 meal_id，先後順序不影響結果
+      for (const mealId of mealEditorReplacingIds.value) {
+        plan.value = await replaceMeal(plan.value.id, { meal_id: mealId, new_recipe_id: recipeId })
+      }
+      mealEditorReplacingIds.value = []
+      clearMealEditorSelection()
     } else {
       const { date, mealType } = mealEditor.value
       const needsUser = FIXED_MEAL_TYPES.includes(mealType as FixedMealType)
@@ -449,6 +546,22 @@ async function removeMealEditorDish(mealId: number) {
   adjustError.value = null
   try {
     plan.value = await removeDish(plan.value.id, mealId)
+  } catch (e) {
+    adjustError.value = e instanceof Error ? e.message : '移除失敗，請稍後再試'
+  } finally {
+    mealEditorBusy.value = false
+  }
+}
+
+async function removeSelectedDishes() {
+  if (!plan.value?.id || mealEditorSelected.value.size === 0) return
+  mealEditorBusy.value = true
+  adjustError.value = null
+  try {
+    for (const mealId of mealEditorSelected.value) {
+      plan.value = await removeDish(plan.value.id, mealId)
+    }
+    clearMealEditorSelection()
   } catch (e) {
     adjustError.value = e instanceof Error ? e.message : '移除失敗，請稍後再試'
   } finally {
@@ -898,7 +1011,35 @@ function toggleDiffExpanded(date: string) {
       <template v-if="plan">
         <div class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-ink/10 bg-surface p-4">
           <div>
-            <h1 class="font-serif text-2xl text-ink">{{ plan.plan_date }} 那一週</h1>
+            <div class="relative flex items-center gap-2">
+              <h1 class="font-serif text-2xl text-ink">{{ plan.plan_date }} 那一週</h1>
+              <button
+                type="button"
+                class="rounded-full border border-ink/15 px-2.5 py-1 text-xs font-semibold text-ink hover:bg-bg"
+                @click="showWeekPicker = !showWeekPicker"
+              >
+                查看其他週 {{ showWeekPicker ? '▴' : '▾' }}
+              </button>
+
+              <div
+                v-if="showWeekPicker"
+                class="absolute left-0 top-full z-20 mt-1 max-h-72 w-64 overflow-y-auto rounded-xl border border-ink/10 bg-surface p-2 shadow-lg"
+              >
+                <p v-if="otherPlansLoading" class="px-2 py-1 text-xs text-tea">載入中…</p>
+                <p v-else-if="otherPlans.length === 0" class="px-2 py-1 text-xs text-tea">還沒有其他週的紀錄</p>
+                <button
+                  v-for="p in otherPlans"
+                  :key="p.id"
+                  type="button"
+                  class="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-sm hover:bg-bg"
+                  :class="p.id === plan.id ? 'bg-accent-tint text-ink' : 'text-ink'"
+                  @click="switchToPlan(p.id)"
+                >
+                  <span>{{ p.plan_date }}</span>
+                  <span class="text-xs text-tea">{{ p.plan_status }}</span>
+                </button>
+              </div>
+            </div>
             <p class="text-xs text-tea">
               狀態：{{ plan.plan_status }} · {{ userA?.name }} 目標 {{ plan.user_a_daily_calories_target }}kcal
               <span v-if="plan.user_a_menstrual_phase && plan.user_a_menstrual_phase !== '無'">
@@ -907,16 +1048,26 @@ function toggleDiffExpanded(date: string) {
               · {{ userB?.name }} 目標 {{ plan.user_b_daily_calories_target }}kcal
             </p>
           </div>
-          <div class="text-right">
+          <div class="flex shrink-0 items-start gap-2">
             <button
               type="button"
-              class="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-on-accent hover:bg-accent-bright disabled:opacity-50"
-              :disabled="confirming"
-              @click="submitConfirm"
+              class="rounded-full border border-accent px-4 py-2 text-sm font-semibold text-accent hover:bg-accent hover:text-on-accent disabled:opacity-50"
+              :disabled="regeneratingWeek"
+              @click="submitRegenerateWeek"
             >
-              {{ confirming ? '確認中…' : '確認推薦' }}
+              {{ regeneratingWeek ? '推薦中…' : '整週重新推薦' }}
             </button>
-            <p v-if="confirmedListId !== null" class="mt-1 text-xs text-accent">已生成購物清單（#{{ confirmedListId }}）</p>
+            <div class="text-right">
+              <button
+                type="button"
+                class="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-on-accent hover:bg-accent-bright disabled:opacity-50"
+                :disabled="confirming"
+                @click="submitConfirm"
+              >
+                {{ confirming ? '確認中…' : '確認推薦' }}
+              </button>
+              <p v-if="confirmedListId !== null" class="mt-1 text-xs text-accent">已生成購物清單（#{{ confirmedListId }}）</p>
+            </div>
           </div>
         </div>
         <p v-if="confirmError" class="mt-2 rounded-lg bg-alert/10 px-3 py-2 text-sm text-alert">{{ confirmError }}</p>
@@ -1045,95 +1196,132 @@ function toggleDiffExpanded(date: string) {
           </div>
         </section>
 
-        <section v-if="mealEditor" class="mt-4 rounded-2xl border border-accent bg-accent-tint/50 p-4">
-          <div class="flex items-center justify-between">
-            <p class="text-sm text-ink">編輯：{{ mealEditor.date }} {{ mealTypeLabel(mealEditor.mealType) }}</p>
-            <button type="button" class="text-xs text-tea hover:text-ink" @click="closeMealEditor">關閉</button>
-          </div>
-          <p class="mt-1 text-xs text-tea">
-            可以自由新增/移除這一餐的食譜。組成改變後份量會先概略分配，按「重算份量」依熱量目標重新精算整天的份量。
-          </p>
-
-          <ul v-if="mealEditorDishes().length" class="mt-3 divide-y divide-ink/10 rounded-xl border border-ink/10 bg-surface px-3">
-            <li v-for="d in mealEditorDishes()" :key="d.id" class="flex items-center justify-between gap-2 py-2 text-sm">
-              <div class="min-w-0">
-                <span class="text-ink">{{ d.recipe_name }}</span>
-                <span class="ml-1 text-xs text-tea">{{ userName(d.assigned_user_id) }} · {{ d.serving_weight_g }}g</span>
+        <!-- 編輯面板：改成靠右側滑出的視窗，蓋在畫面上，不會把下面的內容往下推 -->
+        <Teleport to="body">
+          <div v-if="mealEditor" class="fixed inset-0 z-30 flex justify-end">
+            <div class="absolute inset-0 bg-ink/30" @click="closeMealEditor" />
+            <section class="relative flex h-full w-full max-w-md flex-col overflow-y-auto border-l border-accent bg-accent-tint/50 p-4 shadow-xl">
+              <div class="flex items-center justify-between">
+                <p class="text-sm text-ink">編輯：{{ mealEditor.date }} {{ mealTypeLabel(mealEditor.mealType) }}</p>
+                <button type="button" class="text-xs text-tea hover:text-ink" @click="closeMealEditor">關閉 ✕</button>
               </div>
-              <div class="flex shrink-0 gap-2">
-                <button type="button" class="text-xs font-semibold text-accent hover:text-accent-bright" :disabled="mealEditorBusy" @click="startReplaceDish(d.id)">
-                  換一道
-                </button>
-                <button type="button" class="text-xs text-tea hover:text-alert" :disabled="mealEditorBusy" @click="removeMealEditorDish(d.id)">
-                  移除
-                </button>
-              </div>
-            </li>
-          </ul>
-          <p v-else class="mt-3 text-xs text-tea">這一餐目前沒有菜</p>
-
-          <div class="mt-3 rounded-xl border border-ink/15 bg-surface p-3">
-            <div class="flex items-center justify-between">
-              <p class="text-xs font-semibold text-ink">
-                {{ mealEditorReplacingId !== null ? '選一道換掉上面那道菜' : '新增食譜' }}
+              <p class="mt-1 text-xs text-tea">
+                可以自由新增/移除這一餐的食譜，或勾選多道菜一起處理。組成改變後份量會先概略分配，按「重算份量」依熱量目標重新精算整天的份量。
               </p>
-              <button v-if="mealEditorReplacingId !== null" type="button" class="text-xs text-tea hover:text-ink" @click="cancelReplaceDish">
-                取消換菜
-              </button>
-            </div>
-            <div v-if="mealEditorReplacingId === null && FIXED_MEAL_TYPES.includes(mealEditor.mealType as FixedMealType)" class="mt-2 flex gap-2">
-              <button
-                v-for="user in [userA, userB]"
-                :key="user ? user.id : ''"
-                type="button"
-                class="rounded-full border px-3 py-1 text-xs"
-                :class="user && mealEditorAddUserId === user.id ? 'border-accent bg-accent text-on-accent' : 'border-ink/15 text-ink hover:bg-bg'"
-                @click="user && (mealEditorAddUserId = user.id)"
-              >
-                加給 {{ user?.name }}
-              </button>
-            </div>
-            <div class="mt-2 flex gap-2">
-              <input
-                v-model="mealEditorQuery"
-                type="text"
-                placeholder="食譜名稱"
-                class="w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink"
-                @keydown.enter="runMealEditorSearch"
-              />
-              <button
-                type="button"
-                class="shrink-0 rounded-lg border border-ink/15 px-3 py-2 text-xs font-semibold text-ink hover:bg-bg disabled:opacity-50"
-                :disabled="mealEditorSearching"
-                @click="runMealEditorSearch"
-              >
-                {{ mealEditorSearching ? '搜尋中…' : '搜尋' }}
-              </button>
-            </div>
-            <ul v-if="mealEditorResults.length" class="mt-2 divide-y divide-ink/10">
-              <li v-for="r in mealEditorResults" :key="r.id" class="flex items-center justify-between py-1.5 text-sm">
-                <span class="text-ink">{{ r.recipe_name }}<span class="text-tea">（{{ r.category }}・{{ r.cost_level }}）</span></span>
-                <button
-                  type="button"
-                  class="text-xs font-semibold text-accent hover:text-accent-bright disabled:opacity-50"
-                  :disabled="mealEditorBusy"
-                  @click="chooseMealEditorRecipe(r.id)"
-                >
-                  選這個
-                </button>
-              </li>
-            </ul>
-          </div>
 
-          <button
-            type="button"
-            class="mt-3 w-full rounded-full border border-accent py-2 text-xs font-semibold text-accent hover:bg-accent hover:text-on-accent disabled:opacity-50"
-            :disabled="rebalancingDay !== null"
-            @click="submitRebalanceDay(mealEditor.date)"
-          >
-            {{ rebalancingDay === mealEditor.date ? '計算中…' : '重算這天的份量' }}
-          </button>
-        </section>
+              <div v-if="mealEditorSelected.size > 0" class="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-accent bg-surface px-3 py-2">
+                <span class="text-xs font-semibold text-ink">已選 {{ mealEditorSelected.size }} 項</span>
+                <button type="button" class="text-xs font-semibold text-accent hover:text-accent-bright" :disabled="mealEditorBusy" @click="startBulkReplace">
+                  一起換成…
+                </button>
+                <button type="button" class="text-xs text-tea hover:text-alert" :disabled="mealEditorBusy" @click="removeSelectedDishes">
+                  一起移除
+                </button>
+                <button type="button" class="ml-auto text-xs text-tea hover:text-ink" @click="clearMealEditorSelection">取消選取</button>
+              </div>
+
+              <ul v-if="mealEditorDishes().length" class="mt-3 divide-y divide-ink/10 rounded-xl border border-ink/10 bg-surface px-3">
+                <li v-for="d in mealEditorDishes()" :key="d.id" class="flex items-center justify-between gap-2 py-2 text-sm">
+                  <label class="flex min-w-0 items-center gap-2">
+                    <input
+                      type="checkbox"
+                      class="shrink-0 accent-accent"
+                      :checked="mealEditorSelected.has(d.id)"
+                      @change="toggleMealEditorSelected(d.id)"
+                    />
+                    <span class="min-w-0">
+                      <span class="text-ink">{{ d.recipe_name }}</span>
+                      <span class="ml-1 text-xs text-tea">{{ userName(d.assigned_user_id) }} · {{ d.serving_weight_g }}g</span>
+                    </span>
+                  </label>
+                  <div class="flex shrink-0 gap-2">
+                    <button type="button" class="text-xs font-semibold text-accent hover:text-accent-bright" :disabled="mealEditorBusy" @click="startReplaceDish(d.id)">
+                      換一道
+                    </button>
+                    <button type="button" class="text-xs text-tea hover:text-alert" :disabled="mealEditorBusy" @click="removeMealEditorDish(d.id)">
+                      移除
+                    </button>
+                  </div>
+                </li>
+              </ul>
+              <p v-else class="mt-3 text-xs text-tea">這一餐目前沒有菜</p>
+
+              <div class="mt-3 rounded-xl border border-ink/15 bg-surface p-3">
+                <div class="flex items-center justify-between">
+                  <p class="text-xs font-semibold text-ink">
+                    {{ mealEditorReplacingIds.length > 1 ? `選一道換掉選取的 ${mealEditorReplacingIds.length} 道菜` : mealEditorReplacingIds.length === 1 ? '選一道換掉上面那道菜' : '新增食譜' }}
+                  </p>
+                  <button v-if="mealEditorReplacingIds.length > 0" type="button" class="text-xs text-tea hover:text-ink" @click="cancelReplaceDish">
+                    取消換菜
+                  </button>
+                </div>
+                <div v-if="mealEditorReplacingIds.length === 0 && FIXED_MEAL_TYPES.includes(mealEditor.mealType as FixedMealType)" class="mt-2 flex gap-2">
+                  <button
+                    v-for="user in [userA, userB]"
+                    :key="user ? user.id : ''"
+                    type="button"
+                    class="rounded-full border px-3 py-1 text-xs"
+                    :class="user && mealEditorAddUserId === user.id ? 'border-accent bg-accent text-on-accent' : 'border-ink/15 text-ink hover:bg-bg'"
+                    @click="user && (mealEditorAddUserId = user.id)"
+                  >
+                    加給 {{ user?.name }}
+                  </button>
+                </div>
+                <div class="mt-2 flex gap-2">
+                  <input
+                    v-model="mealEditorQuery"
+                    type="text"
+                    placeholder="食譜名稱"
+                    class="w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink"
+                    @keydown.enter="runMealEditorSearch"
+                  />
+                  <button
+                    type="button"
+                    class="shrink-0 rounded-lg border border-ink/15 px-3 py-2 text-xs font-semibold text-ink hover:bg-bg disabled:opacity-50"
+                    :disabled="mealEditorSearching"
+                    @click="runMealEditorSearch"
+                  >
+                    {{ mealEditorSearching ? '搜尋中…' : '搜尋' }}
+                  </button>
+                </div>
+                <div v-if="recentMealSearches.length" class="mt-2 flex flex-wrap gap-1.5">
+                  <span class="text-[11px] text-tea">最近查過：</span>
+                  <button
+                    v-for="q in recentMealSearches"
+                    :key="q"
+                    type="button"
+                    class="rounded-full border border-ink/15 px-2 py-0.5 text-[11px] text-ink hover:bg-bg"
+                    @click="useRecentMealSearch(q)"
+                  >
+                    {{ q }}
+                  </button>
+                </div>
+                <ul v-if="mealEditorResults.length" class="mt-2 divide-y divide-ink/10">
+                  <li v-for="r in mealEditorResults" :key="r.id" class="flex items-center justify-between py-1.5 text-sm">
+                    <span class="text-ink">{{ r.recipe_name }}<span class="text-tea">（{{ r.category }}・{{ r.cost_level }}）</span></span>
+                    <button
+                      type="button"
+                      class="text-xs font-semibold text-accent hover:text-accent-bright disabled:opacity-50"
+                      :disabled="mealEditorBusy"
+                      @click="chooseMealEditorRecipe(r.id)"
+                    >
+                      選這個
+                    </button>
+                  </li>
+                </ul>
+              </div>
+
+              <button
+                type="button"
+                class="mt-3 w-full rounded-full border border-accent py-2 text-xs font-semibold text-accent hover:bg-accent hover:text-on-accent disabled:opacity-50"
+                :disabled="rebalancingDay !== null"
+                @click="submitRebalanceDay(mealEditor.date)"
+              >
+                {{ rebalancingDay === mealEditor.date ? '計算中…' : '重算這天的份量' }}
+              </button>
+            </section>
+          </div>
+        </Teleport>
       </template>
     </template>
   </div>

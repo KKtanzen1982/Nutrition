@@ -405,6 +405,14 @@ export interface GenerateMealPlanPayload {
   user_id_b: number
 }
 
+export interface MealPlanSummary {
+  id: number
+  plan_date: string
+  user_id_a: number
+  user_id_b: number
+  plan_status: string
+}
+
 export interface ReplaceMealPayload {
   meal_id: number
   new_recipe_id: number

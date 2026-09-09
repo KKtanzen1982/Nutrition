@@ -5,6 +5,7 @@ import type {
   ConfirmMealPlanResponse,
   GenerateMealPlanPayload,
   MealPlanDetail,
+  MealPlanSummary,
   RebalanceDayPayload,
   RegenerateDayPayload,
   ReplaceMealPayload,
@@ -13,6 +14,10 @@ import type {
 
 export function generateMealPlan(payload: GenerateMealPlanPayload): Promise<MealPlanDetail> {
   return apiPost('/meal-plans/generate', payload)
+}
+
+export function listMealPlans(params: { user_id?: number; start_date?: string; end_date?: string }): Promise<MealPlanSummary[]> {
+  return apiGet<MealPlanSummary[]>('/meal-plans', params)
 }
 
 export function fetchMealPlan(planId: number): Promise<MealPlanDetail> {
