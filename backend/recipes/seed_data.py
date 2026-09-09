@@ -276,6 +276,26 @@ RECIPES = [
 ]
 
 
+# 盛產季節（春/夏/秋/冬，逗號分隔）。資料來源：農業部「各月份可供應之國產蔬菜、水果品項參考資料」
+# （107 年 1 月 24 日修訂，https://4b1q.moa.gov.tw）與農業部農業知識入口網酪梨/檸檬產期頁面。
+# 判定方式：某一季（3個月）裡有 2 個月以上缺席才算「非產季」，排除該季；沒列在這裡的食材
+# 全年都在供應清單上（或不是這份參考資料追蹤的品項，如進口水果/辛香料/加工食品），不做季節限制。
+INGREDIENT_SEASONS = {
+    "小黃瓜": "春,秋,冬",       # 5、6、7 月供應清單缺席
+    "花椰菜": "春,秋,冬",       # 5、6、7 月供應清單缺席
+    "菠菜": "冬",               # 只有 11、12、1、2、3 月在清單上
+    "洋蔥": "春,夏,冬",         # 10、11、12 月供應清單缺席
+    "茄子": "春,夏,秋",         # 12、1、2 月供應清單缺席
+    "四季豆": "春,冬",          # 只有 1、2、3、4、12 月在清單上（菜豆）
+    "地瓜葉": "春,夏,秋",       # 12、1、2 月供應清單缺席（葉用甘藷）
+    "白蘿蔔": "春,秋,冬",       # 5、6、7 月供應清單缺席
+    "蘿蔓生菜": "冬",           # 只有 11、12、1、2、3 月在清單上（結球萵苣）
+    "馬鈴薯": "春,夏,冬",       # 9、10、11 月供應清單缺席
+    "酪梨": "夏,秋",            # 盛產期 6~9 月
+    "檸檬": "夏",               # 盛產期 6~8 月
+}
+
+
 def _get_or_create_ingredients(db: Session) -> dict:
     existing = {i.ingredient_name: i.id for i in db.query(IngredientLibrary).all()}
     for name, category, unit, cal, protein, carbs, fat, fiber, tracked, threshold in INGREDIENTS:
@@ -285,6 +305,7 @@ def _get_or_create_ingredients(db: Session) -> dict:
             ingredient_name=name, category=category, unit=unit,
             calories_per_100g=cal, protein_per_100g=protein, carbs_per_100g=carbs,
             fat_per_100g=fat, fiber_per_100g=fiber, needs_stock_tracking=tracked,
+            season=INGREDIENT_SEASONS.get(name),
         )
         db.add(ing)
         db.flush()
