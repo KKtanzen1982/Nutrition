@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from database import get_db
-from recipes.models import IngredientLibrary, Recipe
+from recipes.models import IngredientLibrary
 from recipes.schemas import (
     IngredientCreate, IngredientUpdate, IngredientStockUpdate, IngredientResponse, IngredientStockResponse,
     RecipeCreate, RecipeUpdate, RecipeStepCreate, RecipeIngredientCreate, RecipeResponse,
@@ -71,10 +71,10 @@ def update_ingredient_stock(ingredient_id: int, payload: IngredientStockUpdate, 
 
 @router.post("/recipes", response_model=RecipeResponse, status_code=201)
 def create_recipe(payload: RecipeCreate, db: Session = Depends(get_db)):
-    existing = db.query(Recipe).filter(Recipe.recipe_name == payload.recipe_name).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="食譜名稱已存在")
-    return recipe_service.create_recipe(db, payload)
+    try:
+        return recipe_service.create_recipe(db, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/recipes/search")

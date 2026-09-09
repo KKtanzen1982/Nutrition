@@ -132,12 +132,32 @@ class RecipeService:
             self.calculate_nutrition(db, rid)
 
     def create_recipe(self, db: Session, data) -> Recipe:
+        """新增食譜；recipe_name 有資料庫唯一鍵限制，而刪除食譜是軟刪除（is_active=False，實體列還在），
+        如果同名的食譜之前被刪過，直接新增會撞到唯一鍵報錯——所以改成就地「復活」那筆舊資料，
+        用新內容整組覆蓋（食材/步驟都重新整組寫入），對使用者來說等同重新建立同名食譜。
+        只有同名且目前還是啟用中的食譜才會擋掉（真的名稱衝突）。"""
         payload = data.model_dump()
         ingredients = payload.pop("ingredients")
         steps = payload.pop("steps")
-        recipe = Recipe(**payload)
-        db.add(recipe)
-        db.flush()
+
+        existing = db.query(Recipe).filter(Recipe.recipe_name == payload["recipe_name"]).first()
+        if existing and existing.is_active:
+            raise ValueError("食譜名稱已存在")
+
+        if existing:
+            recipe = existing
+            for k, v in payload.items():
+                setattr(recipe, k, v)
+            recipe.is_active = True
+            recipe.last_updated_at = datetime.utcnow()
+            db.query(RecipeIngredient).filter(RecipeIngredient.recipe_id == recipe.id).delete()
+            db.query(RecipeStep).filter(RecipeStep.recipe_id == recipe.id).delete()
+            db.flush()
+        else:
+            recipe = Recipe(**payload)
+            db.add(recipe)
+            db.flush()
+
         for ing in ingredients:
             db.add(RecipeIngredient(recipe_id=recipe.id, **ing))
         for step in steps:

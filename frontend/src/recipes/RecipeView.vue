@@ -521,10 +521,14 @@ async function submitCreate() {
       </div>
     </template>
 
-    <section v-if="selectedId !== null" class="mt-6 rounded-2xl border border-accent bg-accent-tint/40 p-6">
+    <!-- 選食譜來看/編輯改成靠右側滑出的視窗，不用在清單下面捲半天才找得到 -->
+    <Teleport to="body">
+      <div v-if="selectedId !== null" class="fixed inset-0 z-30 flex justify-end">
+        <div class="absolute inset-0 bg-ink/30" @click="closeDetail" />
+        <section class="relative flex h-full w-full max-w-md flex-col overflow-y-auto border-l border-accent bg-accent-tint/40 p-6 shadow-xl">
       <div class="flex items-center justify-between">
         <h2 class="font-serif text-xl text-ink">{{ detail?.recipe_name ?? '載入中…' }}</h2>
-        <button type="button" class="text-xs text-tea hover:text-ink" @click="closeDetail">關閉</button>
+        <button type="button" class="text-xs text-tea hover:text-ink" @click="closeDetail">關閉 ✕</button>
       </div>
 
       <p v-if="detailLoading" class="mt-3 text-sm text-tea">載入中…</p>
@@ -692,6 +696,8 @@ async function submitCreate() {
 
         <button type="button" class="mt-4 text-xs text-tea hover:text-alert" @click="removeRecipe">刪除這個食譜</button>
       </template>
-    </section>
+        </section>
+      </div>
+    </Teleport>
   </div>
 </template>
