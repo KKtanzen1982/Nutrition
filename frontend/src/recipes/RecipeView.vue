@@ -75,7 +75,10 @@ function reload() {
   }
 }
 
-watch([categoryFilter, costFilter, page], reload)
+watch([categoryFilter, costFilter, page], () => {
+  clearSelection()
+  reload()
+})
 reload()
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit)))
@@ -84,9 +87,44 @@ let searchDebounce: ReturnType<typeof setTimeout> | undefined
 function onQueryInput() {
   clearTimeout(searchDebounce)
   searchDebounce = setTimeout(() => {
+    clearSelection()
     page.value = 1
     reload()
   }, 350)
+}
+
+// ---- 多選刪除：清單/搜尋結果都可以勾選，一次刪掉好幾道食譜（軟刪除，跟單筆刪除同一套邏輯）----
+const selectedIds = ref<Set<number>>(new Set())
+const deletingSelected = ref(false)
+
+function toggleSelected(id: number) {
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedIds.value = next
+}
+function clearSelection() {
+  selectedIds.value = new Set()
+}
+
+async function removeSelectedRecipes() {
+  if (selectedIds.value.size === 0) return
+  const ok = await confirmDialog(`確定要刪除選取的 ${selectedIds.value.size} 道食譜嗎？`)
+  if (!ok) return
+  deletingSelected.value = true
+  error.value = null
+  try {
+    for (const id of selectedIds.value) {
+      await deleteRecipe(id)
+    }
+    if (selectedId.value !== null && selectedIds.value.has(selectedId.value)) closeDetail()
+    clearSelection()
+    reload()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '刪除失敗，請稍後再試'
+  } finally {
+    deletingSelected.value = false
+  }
 }
 
 const selectedId = ref<number | null>(null)
@@ -491,13 +529,35 @@ async function submitCreate() {
     <p v-if="loading" class="mt-4 text-sm text-tea">載入中…</p>
     <p v-if="error" class="mt-4 rounded-lg bg-alert/10 px-3 py-2 text-sm text-alert">{{ error }}</p>
 
+    <div v-if="selectedIds.size > 0" class="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-accent bg-surface px-3 py-2">
+      <span class="text-xs font-semibold text-ink">已選 {{ selectedIds.size }} 道食譜</span>
+      <button
+        type="button"
+        class="text-xs font-semibold text-alert hover:opacity-80 disabled:opacity-50"
+        :disabled="deletingSelected"
+        @click="removeSelectedRecipes"
+      >
+        {{ deletingSelected ? '刪除中…' : '刪除選取的' }}
+      </button>
+      <button type="button" class="ml-auto text-xs text-tea hover:text-ink" @click="clearSelection">取消選取</button>
+    </div>
+
     <ul v-if="searchResults && !loading" class="mt-4 divide-y divide-ink/10 rounded-2xl border border-ink/10 bg-surface">
       <li v-for="r in searchResults" :key="r.id" class="flex cursor-pointer items-center justify-between p-4" @click="openDetail(r.id)">
-        <div>
-          <p class="text-sm text-ink">{{ r.recipe_name }}</p>
-          <p class="text-xs text-tea">{{ r.category }} · {{ r.cost_level }}</p>
+        <div class="flex min-w-0 items-center gap-3">
+          <input
+            type="checkbox"
+            class="shrink-0 accent-accent"
+            :checked="selectedIds.has(r.id)"
+            @click.stop
+            @change="toggleSelected(r.id)"
+          />
+          <div class="min-w-0">
+            <p class="text-sm text-ink">{{ r.recipe_name }}</p>
+            <p class="text-xs text-tea">{{ r.category }} · {{ r.cost_level }}</p>
+          </div>
         </div>
-        <span class="font-serif text-lg text-ink">{{ r.total_calories_kcal ?? '—' }}<small class="text-sm text-tea">kcal</small></span>
+        <span class="shrink-0 font-serif text-lg text-ink">{{ r.total_calories_kcal ?? '—' }}<small class="text-sm text-tea">kcal</small></span>
       </li>
       <li v-if="searchResults.length === 0" class="p-4 text-sm text-tea">沒有符合的食譜</li>
     </ul>
@@ -505,11 +565,20 @@ async function submitCreate() {
     <template v-else-if="!loading">
       <ul class="mt-4 divide-y divide-ink/10 rounded-2xl border border-ink/10 bg-surface">
         <li v-for="r in items" :key="r.id" class="flex cursor-pointer items-center justify-between p-4" @click="openDetail(r.id)">
-          <div>
-            <p class="text-sm text-ink">{{ r.recipe_name }}</p>
-            <p class="text-xs text-tea">{{ r.category }} · {{ r.cost_level }}</p>
+          <div class="flex min-w-0 items-center gap-3">
+            <input
+              type="checkbox"
+              class="shrink-0 accent-accent"
+              :checked="selectedIds.has(r.id)"
+              @click.stop
+              @change="toggleSelected(r.id)"
+            />
+            <div class="min-w-0">
+              <p class="text-sm text-ink">{{ r.recipe_name }}</p>
+              <p class="text-xs text-tea">{{ r.category }} · {{ r.cost_level }}</p>
+            </div>
           </div>
-          <span class="font-serif text-lg text-ink">{{ r.nutrition?.total_calories_kcal ?? '—' }}<small class="text-sm text-tea">kcal</small></span>
+          <span class="shrink-0 font-serif text-lg text-ink">{{ r.nutrition?.total_calories_kcal ?? '—' }}<small class="text-sm text-tea">kcal</small></span>
         </li>
         <li v-if="items.length === 0" class="p-4 text-sm text-tea">沒有符合的食譜</li>
       </ul>
