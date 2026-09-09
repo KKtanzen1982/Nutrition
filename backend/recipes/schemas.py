@@ -53,6 +53,7 @@ class RecipeCreate(BaseModel):
     cost_level: str
     is_vegetarian: bool = False
     allergen_tags: Optional[str] = ""
+    carb_source: Optional[str] = None  # 只有「主食」類會填（飯/麵/其他），供選餐演算法主食輪替/白飯規則判斷
     ingredients: List[RecipeIngredientCreate] = Field(..., min_length=1)
     steps: List[RecipeStepCreate] = Field(..., min_length=1)
 
@@ -65,6 +66,7 @@ class RecipeUpdate(BaseModel):
     is_vegetarian: Optional[bool] = None
     allergen_tags: Optional[str] = None
     is_active: Optional[bool] = None
+    carb_source: Optional[str] = None
 
 
 class IngredientStockResponse(BaseModel):
@@ -140,6 +142,7 @@ class RecipeResponse(BaseModel):
     is_active: bool
     is_vegetarian: bool
     allergen_tags: Optional[str] = None
+    carb_source: Optional[str] = None
     created_at: datetime
     last_updated_at: datetime
     ingredients: List[RecipeIngredientResponse] = []

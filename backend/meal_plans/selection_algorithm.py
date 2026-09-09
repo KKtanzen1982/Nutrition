@@ -32,6 +32,10 @@ CATEGORY_VARIETY_CAP = {"肉": 3, "菜": 5, "下午茶": 2}
 # 主食白飯規則：週一到週五中午是便當（見 prep_planner.py），便當主食一律白飯，方便備料；
 # 其他餐（週末午餐＋每天晚餐）白飯占比抓 80%，用累積比例決定每一格要不要白飯，維持「同輸入跑兩次結果一致」。
 BENTO_CARB_SOURCE = "飯"
+# 便當主食要選「純白飯」這道，不能選咖哩雞肉飯/打拋豬肉飯這種本身已經帶肉的一鍋飯料理——
+# 便當是主食/肉/菜三格分開裝（見 prep_planner.py:4），主食格選到帶肉的飯會跟另外配的「肉」格重複，
+# 備料上也沒辦法把肉單獨退冰/微波。純白飯食譜需要另外用 create_recipe API 新增（carb_source="飯"）。
+BENTO_PLAIN_STAPLE_NAMES = {"白飯"}
 BENTO_WEEKDAY_CUTOFF = 5  # date.weekday() < 5 為週一~週五
 OTHER_MEAL_RICE_RATIO = 0.8
 
@@ -76,17 +80,23 @@ def select_recipe_for_slot(candidates: List[Dict], category: str, target_calorie
                             weekly_variety: Optional[Dict[str, Set[int]]] = None,
                             secondary_target: Optional[Tuple[float, float]] = None,
                             require_carb_source: Optional[str] = None,
-                            exclude_carb_source: Optional[str] = None) -> Optional[Dict]:
+                            exclude_carb_source: Optional[str] = None,
+                            require_recipe_name_in: Optional[Set[str]] = None) -> Optional[Dict]:
     """secondary_target: (calories, protein_g)，共食類餐點（午餐/晚餐）兩人熱量目標常常差很多，
     只用平均值選菜會讓熱量需求較低那方的份量在後續各自縮放時撞到 SERVING_SCALE_MIN 下限、實際熱量超出他自己的目標。
     傳入的話評分改採「兩人之中縮放後偏差較大者」（worst-case），挑對兩人都合理的食譜，而不是只顧平均值。
-    require_carb_source/exclude_carb_source：主食白飯規則用，篩不到就退回原候選池（安全防呆，避免因為食譜庫選項不夠而選不到菜）。"""
+    require_carb_source/exclude_carb_source/require_recipe_name_in：主食白飯規則用，
+    篩不到就退回原候選池（安全防呆，避免因為食譜庫選項不夠而選不到菜）。"""
     pool = [r for r in candidates if r["category"] == category]
     if not pool:
         return None
     favorite_recipe_ids = favorite_recipe_ids or set()
     yesterday_carb_sources = yesterday_carb_sources or set()
 
+    if require_recipe_name_in is not None:
+        filtered = [r for r in pool if r.get("recipe_name") in require_recipe_name_in]
+        if filtered:
+            pool = filtered
     if require_carb_source is not None:
         filtered = [r for r in pool if r.get("carb_source") == require_carb_source]
         if filtered:
@@ -209,10 +219,11 @@ def build_day_meals(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dict, 
             b_slot_protein = user_b_ctx["daily_protein_g"] * share * cat_share
             require_carb_source = None
             exclude_carb_source = None
+            require_recipe_name_in = None
             is_bento_lunch = category == "主食" and meal_type == "lunch" and meal_date.weekday() < BENTO_WEEKDAY_CUTOFF
             if category == "主食":
                 if is_bento_lunch:
-                    require_carb_source = BENTO_CARB_SOURCE
+                    require_recipe_name_in = BENTO_PLAIN_STAPLE_NAMES
                 elif _should_pick_rice(other_meal_rice_tracker):
                     require_carb_source = BENTO_CARB_SOURCE
                 else:
@@ -225,7 +236,8 @@ def build_day_meals(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dict, 
                                              favorite_recipe_ids, yesterday_carb_sources, weekly_variety,
                                              secondary_target=(b_slot_cal, b_slot_protein),
                                              require_carb_source=require_carb_source,
-                                             exclude_carb_source=exclude_carb_source)
+                                             exclude_carb_source=exclude_carb_source,
+                                             require_recipe_name_in=require_recipe_name_in)
             if not recipe:
                 continue
             today_recipe_ids.add(recipe["id"])
