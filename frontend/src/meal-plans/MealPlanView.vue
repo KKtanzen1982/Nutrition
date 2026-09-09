@@ -1259,8 +1259,8 @@ function toggleDiffExpanded(date: string) {
         <!-- 編輯面板：改成靠右側滑出的視窗，蓋在畫面上，不會把下面的內容往下推 -->
         <Teleport to="body">
           <div v-if="mealEditor" class="fixed inset-0 z-30 flex justify-end">
-            <div class="absolute inset-0 bg-ink/30" @click="closeMealEditor" />
-            <section class="relative flex h-full w-full max-w-md flex-col overflow-y-auto border-l border-accent bg-accent-tint/50 p-4 shadow-xl">
+            <div class="absolute inset-0 bg-ink/35" @click="closeMealEditor" />
+            <section class="relative flex h-full w-full max-w-md flex-col overflow-y-auto border-l-2 border-accent bg-surface p-4 shadow-xl">
               <div class="flex items-center justify-between">
                 <p class="text-sm text-ink">編輯：{{ mealEditor.date }} {{ mealTypeLabel(mealEditor.mealType) }}</p>
                 <button type="button" class="text-xs text-tea hover:text-ink" @click="closeMealEditor">關閉 ✕</button>
