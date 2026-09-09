@@ -23,6 +23,7 @@ LARGE_POOL_THRESHOLD = 12
 
 FAVORITE_BONUS = 0.12  # 候選3：最愛清單軟性加權，從分數中扣掉，讓最愛食譜比較容易勝出但不保證
 CARB_SOURCE_REPEAT_PENALTY = 0.12  # 候選1：主食類昨天用過的碳水來源今天扣分
+OVERSHOOT_PENALTY_MULTIPLIER = 1.5  # 熱量超過目標比不足目標扣更多分：使用者在意的是「推薦熱量高於目標」，同等幅度下優先閃避超標
 
 # 整週菜色多樣性上限：這幾個類別一週最多出現幾種「不同」食譜（不是次數上限，是種類上限）。
 # 一旦某類別已經用滿上限種類，候選池會限縮成只剩已經用過的那幾種，之後只在這幾種裡面選。
@@ -48,11 +49,22 @@ def scale_recipe(recipe: Dict, target_calories: float) -> Dict:
     }
 
 
+def _cal_penalty(actual_calories: float, target_calories: float) -> float:
+    """熱量偏差比例，超過目標的部分加權放大（見 OVERSHOOT_PENALTY_MULTIPLIER）"""
+    diff = actual_calories - target_calories
+    pct = abs(diff) / max(target_calories, 1)
+    return pct * OVERSHOOT_PENALTY_MULTIPLIER if diff > 0 else pct
+
+
 def select_recipe_for_slot(candidates: List[Dict], category: str, target_calories: float, target_protein: float,
                             usage_counter: Dict[int, int], cost_counter: Dict[str, int],
                             yesterday_recipe_ids: Set[int], favorite_recipe_ids: Optional[Set[int]] = None,
                             yesterday_carb_sources: Optional[Set[str]] = None,
-                            weekly_variety: Optional[Dict[str, Set[int]]] = None) -> Optional[Dict]:
+                            weekly_variety: Optional[Dict[str, Set[int]]] = None,
+                            secondary_target: Optional[Tuple[float, float]] = None) -> Optional[Dict]:
+    """secondary_target: (calories, protein_g)，共食類餐點（午餐/晚餐）兩人熱量目標常常差很多，
+    只用平均值選菜會讓熱量需求較低那方的份量在後續各自縮放時撞到 SERVING_SCALE_MIN 下限、實際熱量超出他自己的目標。
+    傳入的話評分改採「兩人之中縮放後偏差較大者」（worst-case），挑對兩人都合理的食譜，而不是只顧平均值。"""
     pool = [r for r in candidates if r["category"] == category]
     if not pool:
         return None
@@ -82,9 +94,15 @@ def select_recipe_for_slot(candidates: List[Dict], category: str, target_calorie
     scored = []
     for r in pool:
         scaled = scale_recipe(r, target_calories)
-        cal_diff = abs(scaled["calories"] - target_calories) / max(target_calories, 1)
+        cal_diff = _cal_penalty(scaled["calories"], target_calories)
         protein_diff = abs(scaled["protein_g"] - target_protein) / max(target_protein, 1)
         score = cal_diff + 0.5 * protein_diff
+        if secondary_target is not None:
+            sec_cal, sec_protein = secondary_target
+            sec_scaled = scale_recipe(r, sec_cal)
+            sec_cal_diff = _cal_penalty(sec_scaled["calories"], sec_cal)
+            sec_protein_diff = abs(sec_scaled["protein_g"] - sec_protein) / max(sec_protein, 1)
+            score = max(score, sec_cal_diff + 0.5 * sec_protein_diff)
         if r["id"] in yesterday_recipe_ids:
             score += 0.15
         if category == "主食" and r.get("carb_source") and r["carb_source"] in yesterday_carb_sources:
@@ -155,14 +173,17 @@ def build_day_meals(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dict, 
         if (meal_type, "A") in fixed_meals or (meal_type, "B") in fixed_meals:
             continue
         share = MEAL_SHARES[meal_type]
-        avg_cal = (user_a_ctx["daily_calories_target"] + user_b_ctx["daily_calories_target"]) / 2 * share
-        max_protein = max(user_a_ctx["daily_protein_g"], user_b_ctx["daily_protein_g"]) * share
         for category, cat_share in categories:
-            slot_cal = avg_cal * cat_share
-            slot_protein = max_protein * cat_share
-            recipe = select_recipe_for_slot(candidates, category, slot_cal, slot_protein,
+            a_slot_cal = user_a_ctx["daily_calories_target"] * share * cat_share
+            a_slot_protein = user_a_ctx["daily_protein_g"] * share * cat_share
+            b_slot_cal = user_b_ctx["daily_calories_target"] * share * cat_share
+            b_slot_protein = user_b_ctx["daily_protein_g"] * share * cat_share
+            # 兩人熱量目標常差很多，選菜時看兩人各自的偏差（worst-case），不是只看平均值，
+            # 避免熱量需求較低那方的份量之後被迫縮到 SERVING_SCALE_MIN 下限、實際熱量超出他自己的目標
+            recipe = select_recipe_for_slot(candidates, category, a_slot_cal, a_slot_protein,
                                              usage_counter, cost_counter, yesterday_recipe_ids,
-                                             favorite_recipe_ids, yesterday_carb_sources, weekly_variety)
+                                             favorite_recipe_ids, yesterday_carb_sources, weekly_variety,
+                                             secondary_target=(b_slot_cal, b_slot_protein))
             if not recipe:
                 continue
             today_recipe_ids.add(recipe["id"])
