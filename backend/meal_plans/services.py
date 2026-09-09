@@ -5,7 +5,7 @@ from typing import List, Optional, Dict, Set
 from users.models import User
 from users.services import dietary_preference_service, weight_goal_service
 from fitness.models import WeightRecord, ExerciseSession, DailySteps
-from recipes.models import Recipe
+from recipes.models import Recipe, RecipeIngredient, IngredientLibrary
 from meal_plans.models import (
     WeeklyMealPlan, DailyMealDetail, MealAdjustment, FixedMealPreference,
     ExcludedRecipe, FavoriteRecipe, SoupDayPreference,
@@ -19,6 +19,37 @@ from meal_plans.prep_planner import build_prep_plan
 
 def _parse_csv(text: Optional[str]) -> List[str]:
     return [p.strip() for p in (text or "").split(",") if p.strip()]
+
+
+# 候選5：食材的盛產季節（IngredientLibrary.season）拿來過濾候選食譜——目標日期當下的季節，
+# 排除用到「有標盛產季節、但不是這個季節」的食材的食譜（例如夏天不推薦冬天才盛產的蔬果）。
+# 只有蔬果類食材通常會填 season，其他（穀物/肉類/調味料/乳製品）留空不受影響。
+SEASON_BY_MONTH = {
+    3: "春", 4: "春", 5: "春",
+    6: "夏", 7: "夏", 8: "夏",
+    9: "秋", 10: "秋", 11: "秋",
+    12: "冬", 1: "冬", 2: "冬",
+}
+
+
+def _season_for_date(d: date) -> str:
+    return SEASON_BY_MONTH[d.month]
+
+
+def _out_of_season_recipe_ids(db: Session, target_date: date) -> Set[int]:
+    current_season = _season_for_date(target_date)
+    rows = (
+        db.query(RecipeIngredient.recipe_id, IngredientLibrary.season)
+        .join(IngredientLibrary, RecipeIngredient.ingredient_id == IngredientLibrary.id)
+        .filter(IngredientLibrary.season.isnot(None), IngredientLibrary.season != "")
+        .all()
+    )
+    out_of_season: Set[int] = set()
+    for recipe_id, season_csv in rows:
+        seasons = _parse_csv(season_csv)
+        if seasons and current_season not in seasons:
+            out_of_season.add(recipe_id)
+    return out_of_season
 
 
 def _recipe_to_candidate(recipe: Recipe) -> Dict:
@@ -281,17 +312,18 @@ nutrition_target_service = NutritionTargetService()
 class MealPlanService:
     """規則式週菜單推薦（取代 Claude API 呼叫，見 selection_algorithm.py）"""
 
-    def _candidate_recipes(self, db: Session, user_id_a: int, user_id_b: int) -> List[Dict]:
+    def _candidate_recipes(self, db: Session, user_id_a: int, user_id_b: int, target_date: Optional[date] = None) -> List[Dict]:
         pref_a = dietary_preference_service.get(db, user_id_a)
         pref_b = dietary_preference_service.get(db, user_id_b)
         allergens = set(_parse_csv(pref_a["allergies"])) | set(_parse_csv(pref_b["allergies"]))
         needs_veg = "素食" in _parse_csv(pref_a["restrictions"]) or "素食" in _parse_csv(pref_b["restrictions"])
         excluded_ids = excluded_recipe_service.excluded_recipe_ids(db)
+        out_of_season_ids = _out_of_season_recipe_ids(db, target_date or date.today())
 
         recipes = db.query(Recipe).filter(Recipe.is_active == True).all()
         candidates = []
         for r in recipes:
-            if r.id in excluded_ids:
+            if r.id in excluded_ids or r.id in out_of_season_ids:
                 continue
             tags = set(_parse_csv(r.allergen_tags))
             if tags & allergens:
@@ -314,7 +346,7 @@ class MealPlanService:
     def generate_plan(self, db: Session, user_id_a: int, user_id_b: int, week_start_date) -> Dict:
         ctx_a = nutrition_target_service.get_user_context(db, user_id_a, week_start_date)
         ctx_b = nutrition_target_service.get_user_context(db, user_id_b, week_start_date)
-        candidates = self._candidate_recipes(db, user_id_a, user_id_b)
+        candidates = self._candidate_recipes(db, user_id_a, user_id_b, week_start_date)
         if not candidates:
             raise ValueError("目前沒有符合過敏/飲食限制的候選食譜，無法生成推薦")
         preferred_recipes = fixed_meal_preference_service.build_preferred_recipes(db, user_id_a, user_id_b)
@@ -467,7 +499,7 @@ class MealPlanService:
             raise ValueError("計畫不存在")
         ctx_a = nutrition_target_service.get_user_context(db, plan.user_id_a, meal_date)
         ctx_b = nutrition_target_service.get_user_context(db, plan.user_id_b, meal_date)
-        candidates = self._candidate_recipes(db, plan.user_id_a, plan.user_id_b)
+        candidates = self._candidate_recipes(db, plan.user_id_a, plan.user_id_b, meal_date)
 
         all_meals = db.query(DailyMealDetail).filter(DailyMealDetail.meal_plan_id == plan_id).all()
         usage_counter: Dict[int, int] = {}

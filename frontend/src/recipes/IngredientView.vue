@@ -16,6 +16,14 @@ import { listPurchaseLocations } from '../shopping/purchase_location_api'
 import type { Ingredient, IngredientSearchResult, LowStockIngredient, PurchaseLocation } from '../shared/types'
 
 const CATEGORIES = ['蔬菜', '肉類', '穀物', '乳製品', '調味料', '其他']
+const SEASONS = ['春', '夏', '秋', '冬']
+
+function parseSeasonCsv(season: string | null | undefined): string[] {
+  return (season ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+}
+function toggleSeason(list: string[], s: string): string[] {
+  return list.includes(s) ? list.filter((x) => x !== s) : [...list, s]
+}
 
 const query = ref('')
 const categoryFilter = ref('')
@@ -111,6 +119,7 @@ const editForm = reactive<{
   needs_stock_tracking: boolean
   current_quantity_g: number | null
   min_threshold_g: number | null
+  season: string[]
 }>({
   ingredient_name: '',
   category: CATEGORIES[0],
@@ -123,6 +132,7 @@ const editForm = reactive<{
   needs_stock_tracking: false,
   current_quantity_g: null,
   min_threshold_g: null,
+  season: [],
 })
 const savingEdit = ref(false)
 const editError = ref<string | null>(null)
@@ -141,6 +151,7 @@ function startEdit(item: Ingredient) {
     needs_stock_tracking: item.needs_stock_tracking,
     current_quantity_g: item.stock?.current_quantity_g ?? null,
     min_threshold_g: item.stock?.min_threshold_g ?? null,
+    season: parseSeasonCsv(item.season),
   })
   editError.value = null
   loadLocationPreferences(item.id)
@@ -225,6 +236,7 @@ async function submitEdit(item: Ingredient) {
       fat_per_100g: editForm.fat_per_100g,
       fiber_per_100g: editForm.fiber_per_100g,
       needs_stock_tracking: editForm.needs_stock_tracking,
+      season: editForm.season.length ? editForm.season.join(',') : null,
     })
     if (editForm.needs_stock_tracking) {
       await updateIngredientStock(item.id, {
@@ -253,6 +265,7 @@ const createForm = reactive({
   fat_per_100g: null as number | null,
   fiber_per_100g: null as number | null,
   needs_stock_tracking: false,
+  season: [] as string[],
 })
 const creating = ref(false)
 const createError = ref<string | null>(null)
@@ -262,7 +275,7 @@ async function submitCreate() {
   creating.value = true
   createError.value = null
   try {
-    await createIngredient({ ...createForm })
+    await createIngredient({ ...createForm, season: createForm.season.length ? createForm.season.join(',') : null })
     createForm.ingredient_name = ''
     createForm.calories_per_100g = null
     createForm.protein_per_100g = null
@@ -270,6 +283,7 @@ async function submitCreate() {
     createForm.fat_per_100g = null
     createForm.fiber_per_100g = null
     createForm.needs_stock_tracking = false
+    createForm.season = []
     showCreate.value = false
     page.value = 1
     reload()
@@ -319,6 +333,21 @@ async function submitCreate() {
           追蹤庫存
         </label>
       </div>
+      <div class="mt-3">
+        <p class="text-xs text-tea">盛產季節（蔬果類選填，選了之後推薦菜單時非產季不會被排進去；不選＝不分季節）</p>
+        <div class="mt-1 flex flex-wrap gap-2">
+          <button
+            v-for="s in SEASONS"
+            :key="s"
+            type="button"
+            class="rounded-full border px-3 py-1 text-xs"
+            :class="createForm.season.includes(s) ? 'border-accent bg-accent text-on-accent' : 'border-ink/15 text-ink hover:bg-bg'"
+            @click="createForm.season = toggleSeason(createForm.season, s)"
+          >
+            {{ s }}
+          </button>
+        </div>
+      </div>
       <p v-if="createError" class="mt-3 rounded-lg bg-alert/10 px-3 py-2 text-sm text-alert">{{ createError }}</p>
       <button
         type="button"
@@ -364,6 +393,7 @@ async function submitCreate() {
               <p class="text-sm text-ink">{{ item.ingredient_name }}</p>
               <p class="text-xs text-tea">
                 {{ item.category }} · {{ item.calories_per_100g ?? '—' }} kcal/100g
+                <span v-if="item.season">· {{ item.season }}盛產</span>
                 <span v-if="item.needs_stock_tracking && item.stock"> · 庫存 {{ item.stock.current_quantity_g }}{{ item.stock.unit }}</span>
               </p>
             </div>
@@ -390,6 +420,21 @@ async function submitCreate() {
               <input v-model="editForm.needs_stock_tracking" type="checkbox" class="accent-accent" />
               追蹤庫存
             </label>
+            <div class="sm:col-span-3">
+              <p class="text-xs text-tea">盛產季節（蔬果類選填，不選＝不分季節）</p>
+              <div class="mt-1 flex flex-wrap gap-2">
+                <button
+                  v-for="s in SEASONS"
+                  :key="s"
+                  type="button"
+                  class="rounded-full border px-3 py-1 text-xs"
+                  :class="editForm.season.includes(s) ? 'border-accent bg-accent text-on-accent' : 'border-ink/15 text-ink hover:bg-bg'"
+                  @click="editForm.season = toggleSeason(editForm.season, s)"
+                >
+                  {{ s }}
+                </button>
+              </div>
+            </div>
             <template v-if="editForm.needs_stock_tracking">
               <input v-model.number="editForm.current_quantity_g" type="number" placeholder="目前庫存量" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
               <input v-model.number="editForm.min_threshold_g" type="number" placeholder="補貨警告閾值" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />

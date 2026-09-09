@@ -539,6 +539,7 @@ export interface Ingredient {
   fiber_per_100g: number | null
   preferred_purchase_location: string | null
   needs_stock_tracking: boolean
+  season: string | null
   created_at: string
   stock: IngredientStock | null
 }
@@ -554,6 +555,7 @@ export interface IngredientSearchResult {
   fat_per_100g: number | null
   fiber_per_100g: number | null
   needs_stock_tracking: boolean
+  season?: string | null
 }
 
 export interface LowStockIngredient {
@@ -578,6 +580,7 @@ export interface CreateIngredientPayload {
   fiber_per_100g?: number | null
   preferred_purchase_location?: string | null
   needs_stock_tracking?: boolean
+  season?: string | null
 }
 
 export type UpdateIngredientPayload = Partial<CreateIngredientPayload>
@@ -641,8 +644,12 @@ export interface RecipeListEntry {
   base_weight_g: number
   cost_level: string
   is_active: boolean
-  created_at: string
-  nutrition: RecipeNutrition | null
+  is_vegetarian: boolean
+  carb_source: string | null
+  total_calories_kcal: number | null
+  protein_g: number | null
+  carbs_g: number | null
+  fat_g: number | null
 }
 
 export interface CreateRecipeIngredientPayload {

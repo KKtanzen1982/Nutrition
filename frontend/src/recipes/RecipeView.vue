@@ -578,7 +578,7 @@ async function submitCreate() {
               <p class="text-xs text-tea">{{ r.category }} · {{ r.cost_level }}</p>
             </div>
           </div>
-          <span class="shrink-0 font-serif text-lg text-ink">{{ r.nutrition?.total_calories_kcal ?? '—' }}<small class="text-sm text-tea">kcal</small></span>
+          <span class="shrink-0 font-serif text-lg text-ink">{{ r.total_calories_kcal ?? '—' }}<small class="text-sm text-tea">kcal</small></span>
         </li>
         <li v-if="items.length === 0" class="p-4 text-sm text-tea">沒有符合的食譜</li>
       </ul>

@@ -14,6 +14,7 @@ class IngredientCreate(BaseModel):
     fiber_per_100g: Optional[float] = None
     preferred_purchase_location: Optional[str] = None
     needs_stock_tracking: bool = False
+    season: Optional[str] = None  # 盛產季節（春/夏/秋/冬，逗號分隔），只有蔬果類需要填；不分季節的留空
 
 
 class IngredientUpdate(BaseModel):
@@ -27,6 +28,7 @@ class IngredientUpdate(BaseModel):
     fiber_per_100g: Optional[float] = None
     preferred_purchase_location: Optional[str] = None
     needs_stock_tracking: Optional[bool] = None
+    season: Optional[str] = None
 
 
 class IngredientStockUpdate(BaseModel):
@@ -94,6 +96,7 @@ class IngredientResponse(BaseModel):
     fiber_per_100g: Optional[float] = None
     preferred_purchase_location: Optional[str] = None
     needs_stock_tracking: bool
+    season: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -132,6 +135,23 @@ class RecipeNutritionResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class RecipeSummaryResponse(BaseModel):
+    """瀏覽清單／搜尋結果用的輕量版本，不含食材與步驟——這兩個清單常常一次列幾十筆，
+    帶上食材/步驟會讓每一筆都多觸發好幾次查詢，是清單載入慢、換頁還要重新等待的主因。"""
+    id: int
+    recipe_name: str
+    category: str
+    base_weight_g: int
+    cost_level: str
+    is_active: bool
+    is_vegetarian: bool
+    carb_source: Optional[str] = None
+    total_calories_kcal: Optional[float] = None
+    protein_g: Optional[float] = None
+    carbs_g: Optional[float] = None
+    fat_g: Optional[float] = None
 
 
 class RecipeResponse(BaseModel):

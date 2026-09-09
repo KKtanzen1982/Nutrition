@@ -6,7 +6,7 @@ from database import get_db
 from recipes.models import IngredientLibrary
 from recipes.schemas import (
     IngredientCreate, IngredientUpdate, IngredientStockUpdate, IngredientResponse, IngredientStockResponse,
-    RecipeCreate, RecipeUpdate, RecipeStepCreate, RecipeIngredientCreate, RecipeResponse,
+    RecipeCreate, RecipeUpdate, RecipeStepCreate, RecipeIngredientCreate, RecipeResponse, RecipeSummaryResponse,
 )
 from recipes.services import ingredient_service, recipe_service
 
@@ -77,19 +77,18 @@ def create_recipe(payload: RecipeCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/recipes/search")
+@router.get("/recipes/search", response_model=List[RecipeSummaryResponse])
 def search_recipes(query: str = "", search_by: str = "name", category: Optional[str] = None,
                     exclude_allergen_ids: Optional[str] = None, db: Session = Depends(get_db)):
     ids = [int(i) for i in exclude_allergen_ids.split(",")] if exclude_allergen_ids else None
-    results = recipe_service.search_recipes(db, query, search_by=search_by, category=category, exclude_allergen_ids=ids)
-    return [RecipeResponse.model_validate(r) for r in results]
+    return recipe_service.search_recipes(db, query, search_by=search_by, category=category, exclude_allergen_ids=ids)
 
 
 @router.get("/recipes")
 def list_recipes(category: Optional[str] = None, cost_level: Optional[str] = None, page: int = 1, limit: int = 20,
                   db: Session = Depends(get_db)):
     items, total = recipe_service.list_recipes(db, category=category, cost_level=cost_level, skip=(page - 1) * limit, limit=limit)
-    return {"items": [RecipeResponse.model_validate(i) for i in items], "total": total, "page": page}
+    return {"items": items, "total": total, "page": page}
 
 
 @router.get("/recipes/{recipe_id}", response_model=RecipeResponse)

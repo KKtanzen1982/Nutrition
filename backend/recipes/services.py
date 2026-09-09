@@ -1,8 +1,24 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from datetime import datetime
 from typing import List, Optional, Dict
 
 from recipes.models import IngredientLibrary, IngredientStock, Recipe, RecipeIngredient, RecipeStep, RecipeNutrition
+
+
+def _recipe_to_summary(r: Recipe) -> Dict:
+    """瀏覽/搜尋清單用的輕量版本：不含食材/步驟，避免每筆都觸發額外查詢（原本 list/search 會對每筆食譜
+    各自 lazy-load ingredients、再對每個 ingredient 各自 lazy-load 對應的食材名稱，20 筆食譜就是上百次查詢，
+    是清單載入慢、換頁也要重新等待的主因）。食材/步驟只有看單一食譜詳情時才需要，交給 get_recipe 處理。"""
+    n = r.nutrition
+    return {
+        "id": r.id, "recipe_name": r.recipe_name, "category": r.category,
+        "base_weight_g": r.base_weight_g, "cost_level": r.cost_level,
+        "is_active": r.is_active, "is_vegetarian": r.is_vegetarian, "carb_source": r.carb_source,
+        "total_calories_kcal": n.total_calories_kcal if n else None,
+        "protein_g": n.protein_g if n else None,
+        "carbs_g": n.carbs_g if n else None,
+        "fat_g": n.fat_g if n else None,
+    }
 
 
 class IngredientService:
@@ -204,19 +220,19 @@ class RecipeService:
         return True
 
     def list_recipes(self, db: Session, category: Optional[str] = None, cost_level: Optional[str] = None,
-                      skip: int = 0, limit: int = 20):
-        q = db.query(Recipe).filter(Recipe.is_active == True)
+                      skip: int = 0, limit: int = 20) -> tuple[List[Dict], int]:
+        q = db.query(Recipe).options(joinedload(Recipe.nutrition)).filter(Recipe.is_active == True)
         if category:
             q = q.filter(Recipe.category == category)
         if cost_level:
             q = q.filter(Recipe.cost_level == cost_level)
         total = q.count()
         items = q.offset(skip).limit(limit).all()
-        return items, total
+        return [_recipe_to_summary(r) for r in items], total
 
     def search_recipes(self, db: Session, query: str = "", search_by: str = "name",
-                        category: Optional[str] = None, exclude_allergen_ids: Optional[List[int]] = None):
-        q = db.query(Recipe).filter(Recipe.is_active == True)
+                        category: Optional[str] = None, exclude_allergen_ids: Optional[List[int]] = None) -> List[Dict]:
+        q = db.query(Recipe).options(joinedload(Recipe.nutrition)).filter(Recipe.is_active == True)
         if search_by == "name" and query:
             q = q.filter(Recipe.recipe_name.ilike(f"%{query}%"))
         elif search_by == "ingredient" and query:
@@ -227,12 +243,13 @@ class RecipeService:
             q = q.filter(Recipe.category == category)
         results = q.all()
         if exclude_allergen_ids:
+            # 只有帶了這個篩選才需要碰 ingredients，一般查詢（名稱/分類搜尋）完全不會觸發這段
             excluded = set(exclude_allergen_ids)
             results = [
                 r for r in results
                 if not excluded & {ri.ingredient_id for ri in r.ingredients}
             ]
-        return results
+        return [_recipe_to_summary(r) for r in results]
 
     def add_recipe_steps_version(self, db: Session, recipe_id: int, steps: List[Dict]) -> int:
         new_version = (

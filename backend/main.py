@@ -110,6 +110,7 @@ def _add_missing_columns():
     with engine.connect() as conn:
         conn.execute(text("ALTER TABLE recipes ADD COLUMN IF NOT EXISTS carb_source VARCHAR(20)"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS manual_calories_target FLOAT"))
+        conn.execute(text("ALTER TABLE ingredient_library ADD COLUMN IF NOT EXISTS season VARCHAR(20)"))
         conn.commit()
 
 
