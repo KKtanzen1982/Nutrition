@@ -340,6 +340,27 @@ class MealPlanService:
         db.commit()
         return self.get_plan(db, plan.id)
 
+    def list_plans(self, db: Session, user_id: Optional[int] = None,
+                    start_date: Optional[date] = None, end_date: Optional[date] = None) -> List[Dict]:
+        """依日期區間查詢已產生的週菜單摘要（不含逐餐明細），預設回傳最近的在前"""
+        query = db.query(WeeklyMealPlan)
+        if user_id is not None:
+            query = query.filter(
+                (WeeklyMealPlan.user_id_a == user_id) | (WeeklyMealPlan.user_id_b == user_id)
+            )
+        if start_date is not None:
+            query = query.filter(WeeklyMealPlan.plan_date >= start_date)
+        if end_date is not None:
+            query = query.filter(WeeklyMealPlan.plan_date <= end_date)
+        plans = query.order_by(WeeklyMealPlan.plan_date.desc()).all()
+        return [
+            {
+                "id": p.id, "plan_date": p.plan_date, "user_id_a": p.user_id_a, "user_id_b": p.user_id_b,
+                "plan_status": p.plan_status,
+            }
+            for p in plans
+        ]
+
     def get_plan(self, db: Session, plan_id: int) -> Optional[Dict]:
         plan = db.get(WeeklyMealPlan, plan_id)
         if not plan:

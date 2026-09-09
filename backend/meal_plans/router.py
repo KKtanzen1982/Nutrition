@@ -126,6 +126,13 @@ def generate_meal_plan(payload: GenerateMealPlanRequest, db: Session = Depends(g
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/meal-plans")
+def list_meal_plans(user_id: Optional[int] = None, start_date: Optional[date] = None,
+                     end_date: Optional[date] = None, db: Session = Depends(get_db)):
+    """查詢已產生的週菜單清單（依使用者/日期區間篩選），用來找出某一週對應的 plan_id 以便查看/修改"""
+    return meal_plan_service.list_plans(db, user_id, start_date, end_date)
+
+
 @router.get("/meal-plans/{plan_id}")
 def get_meal_plan(plan_id: int, db: Session = Depends(get_db)):
     plan = meal_plan_service.get_plan(db, plan_id)
