@@ -12,7 +12,10 @@ import {
   removeDish,
   replaceMeal,
 } from './meal_plan_api'
-import { deleteFixedMealPreference, fetchFixedMealPreferences, setFixedMealPreference } from './fixed_meal_preference_api'
+import {
+  deleteFixedMealPreference, fetchFixedMealPreferences, fetchSharedFixedMealPreferences,
+  setFixedMealPreference, setSharedFixedMealPreference,
+} from './fixed_meal_preference_api'
 import { addExcludedRecipe, fetchExcludedRecipes, removeExcludedRecipe } from './excluded_recipe_api'
 import { addFavoriteRecipe, fetchFavoriteRecipes, removeFavoriteRecipe } from './favorite_recipe_api'
 import { fetchSoupDays, setSoupDays } from './soup_day_preference_api'
@@ -25,6 +28,7 @@ import { startOfWeekMonday, toISODate, today } from '../shared/date_utils'
 import type {
   DayMeals, ExcludedRecipe, FavoriteRecipe, FixedMealPreference, FixedMealType,
   MealDetail, MealPlanDetail, MealPlanSummary, MealType, PrepDayMeal, PrepPlan, RecipeSearchResult,
+  SharedFixedMealType, SharedMealCategory,
 } from '../shared/types'
 
 const MEAL_TYPE_LABELS: Record<string, string> = {
@@ -83,12 +87,28 @@ const fixedMealQuery = ref('')
 const fixedMealResults = ref<RecipeSearchResult[]>([])
 const fixedMealSearching = ref(false)
 const fixedMealSaving = ref(false)
+const fixedMealDurationDays = ref('')
 
 function openFixedMealPicker(userId: number, mealType: FixedMealType) {
   fixedMealPickerTarget.value = { userId, mealType }
   fixedMealQuery.value = ''
   fixedMealResults.value = []
+  fixedMealDurationDays.value = ''
   fixedMealsError.value = null
+}
+
+function parseLocalDate(isoDate: string): Date {
+  const [y, m, d] = isoDate.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
+function fixedMealStatusLabel(pref: FixedMealPreference): string {
+  if (pref.duration_days == null || !pref.end_date) return ''
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const end = parseLocalDate(pref.end_date)
+  const remaining = Math.round((end.getTime() - today.getTime()) / 86400000) + 1
+  return remaining > 0 ? `（還剩 ${remaining} 天）` : '（已到期）'
 }
 function closeFixedMealPicker() {
   fixedMealPickerTarget.value = null
@@ -113,7 +133,9 @@ async function chooseFixedMeal(recipeId: number) {
   fixedMealsError.value = null
   try {
     const { userId, mealType } = fixedMealPickerTarget.value
-    const saved = await setFixedMealPreference(userId, mealType, recipeId)
+    const trimmed = String(fixedMealDurationDays.value ?? '').trim()
+    const durationDays = trimmed ? Number(trimmed) : null
+    const saved = await setFixedMealPreference(userId, mealType, recipeId, durationDays)
     fixedMealPrefs.value = [...fixedMealPrefs.value.filter((p) => !(p.user_id === saved.user_id && p.meal_type === saved.meal_type)), saved]
     closeFixedMealPicker()
   } catch (e) {
@@ -128,6 +150,95 @@ async function removeFixedMeal(id: number) {
   try {
     await deleteFixedMealPreference(id)
     fixedMealPrefs.value = fixedMealPrefs.value.filter((p) => p.id !== id)
+  } catch (e) {
+    fixedMealsError.value = e instanceof Error ? e.message : '取消失敗，請稍後再試'
+  }
+}
+
+// ---- 固定餐點：午餐/晚餐是兩人共用的主食+肉+菜(+湯)組合，固定其中一個類別的菜，不分誰吃 ----
+
+const SHARED_FIXED_MEAL_TYPES: SharedFixedMealType[] = ['lunch', 'dinner']
+const SHARED_MEAL_CATEGORIES: SharedMealCategory[] = ['主食', '肉', '菜', '湯']
+
+const sharedFixedMealPrefs = ref<FixedMealPreference[]>([])
+
+async function loadSharedFixedMeals() {
+  fixedMealsLoading.value = true
+  fixedMealsError.value = null
+  try {
+    sharedFixedMealPrefs.value = await fetchSharedFixedMealPreferences()
+  } catch (e) {
+    fixedMealsError.value = e instanceof Error ? e.message : '讀取固定餐點設定失敗'
+  } finally {
+    fixedMealsLoading.value = false
+  }
+}
+
+watchEffect(() => {
+  if (userA.value && userB.value) loadSharedFixedMeals()
+})
+
+function sharedFixedMealFor(mealType: SharedFixedMealType, category: SharedMealCategory): FixedMealPreference | null {
+  return sharedFixedMealPrefs.value.find((p) => p.meal_type === mealType && p.category === category) ?? null
+}
+
+const sharedFixedMealPickerTarget = ref<{ mealType: SharedFixedMealType; category: SharedMealCategory } | null>(null)
+const sharedFixedMealQuery = ref('')
+const sharedFixedMealResults = ref<RecipeSearchResult[]>([])
+const sharedFixedMealSearching = ref(false)
+const sharedFixedMealSaving = ref(false)
+const sharedFixedMealDurationDays = ref('')
+
+function openSharedFixedMealPicker(mealType: SharedFixedMealType, category: SharedMealCategory) {
+  sharedFixedMealPickerTarget.value = { mealType, category }
+  sharedFixedMealQuery.value = ''
+  sharedFixedMealResults.value = []
+  sharedFixedMealDurationDays.value = ''
+  fixedMealsError.value = null
+}
+function closeSharedFixedMealPicker() {
+  sharedFixedMealPickerTarget.value = null
+}
+
+async function runSharedFixedMealSearch() {
+  if (!sharedFixedMealQuery.value.trim() || !sharedFixedMealPickerTarget.value) return
+  sharedFixedMealSearching.value = true
+  fixedMealsError.value = null
+  try {
+    sharedFixedMealResults.value = await searchRecipesByName(sharedFixedMealQuery.value.trim(), sharedFixedMealPickerTarget.value.category)
+  } catch (e) {
+    fixedMealsError.value = e instanceof Error ? e.message : '搜尋失敗'
+  } finally {
+    sharedFixedMealSearching.value = false
+  }
+}
+
+async function chooseSharedFixedMeal(recipeId: number) {
+  if (!sharedFixedMealPickerTarget.value) return
+  sharedFixedMealSaving.value = true
+  fixedMealsError.value = null
+  try {
+    const { mealType } = sharedFixedMealPickerTarget.value
+    const trimmed = String(sharedFixedMealDurationDays.value ?? '').trim()
+    const durationDays = trimmed ? Number(trimmed) : null
+    const saved = await setSharedFixedMealPreference(mealType, recipeId, durationDays)
+    sharedFixedMealPrefs.value = [
+      ...sharedFixedMealPrefs.value.filter((p) => !(p.meal_type === saved.meal_type && p.category === saved.category)),
+      saved,
+    ]
+    closeSharedFixedMealPicker()
+  } catch (e) {
+    fixedMealsError.value = e instanceof Error ? e.message : '設定失敗，請稍後再試'
+  } finally {
+    sharedFixedMealSaving.value = false
+  }
+}
+
+async function removeSharedFixedMeal(id: number) {
+  fixedMealsError.value = null
+  try {
+    await deleteFixedMealPreference(id)
+    sharedFixedMealPrefs.value = sharedFixedMealPrefs.value.filter((p) => p.id !== id)
   } catch (e) {
     fixedMealsError.value = e instanceof Error ? e.message : '取消失敗，請稍後再試'
   }
@@ -804,7 +915,7 @@ function toggleDiffExpanded(date: string) {
         </button>
 
         <div v-if="showFixedMeals" class="mt-3">
-          <p class="text-xs text-tea">早餐/下午茶可以固定吃某個食譜，產生週菜單時只依熱量調整份量，不會被規則式演算法換成別的菜</p>
+          <p class="text-xs text-tea">早餐/下午茶可以固定吃某個食譜，產生週菜單時只依熱量調整份量，不會被規則式演算法換成別的菜；可設定執行天數，天數到了自動改回規則式選餐（留空則永久套用）</p>
           <p v-if="fixedMealsLoading" class="mt-2 text-xs text-tea">載入中…</p>
           <p v-if="fixedMealsError" class="mt-2 rounded-lg bg-alert/10 px-3 py-2 text-xs text-alert">{{ fixedMealsError }}</p>
 
@@ -813,7 +924,10 @@ function toggleDiffExpanded(date: string) {
               <p class="text-sm font-semibold text-ink">{{ user.name }}</p>
               <div v-for="mt in FIXED_MEAL_TYPES" :key="mt" class="mt-2 flex items-center gap-2">
                 <span class="w-14 shrink-0 text-xs text-tea">{{ mealTypeLabel(mt) }}</span>
-                <span class="min-w-0 flex-1 truncate text-sm text-ink">{{ fixedMealFor(user.id, mt)?.recipe_name ?? '未固定' }}</span>
+                <span class="min-w-0 flex-1 truncate text-sm text-ink">
+                  {{ fixedMealFor(user.id, mt)?.recipe_name ?? '未固定' }}
+                  <span v-if="fixedMealFor(user.id, mt)" class="text-tea">{{ fixedMealStatusLabel(fixedMealFor(user.id, mt)!) }}</span>
+                </span>
                 <button
                   v-if="fixedMealFor(user.id, mt)"
                   type="button"
@@ -841,6 +955,17 @@ function toggleDiffExpanded(date: string) {
               </p>
               <button type="button" class="text-xs text-tea hover:text-ink" @click="closeFixedMealPicker">關閉</button>
             </div>
+            <div class="mt-2 flex items-center gap-2">
+              <label class="shrink-0 text-xs text-tea">執行天數</label>
+              <input
+                v-model="fixedMealDurationDays"
+                type="number"
+                min="1"
+                placeholder="留空＝永久"
+                class="w-24 rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink"
+              />
+              <span class="text-xs text-tea">天（留空表示永久套用直到手動取消）</span>
+            </div>
             <div class="mt-2 flex gap-2">
               <input
                 v-model="fixedMealQuery"
@@ -866,6 +991,87 @@ function toggleDiffExpanded(date: string) {
                   class="text-xs font-semibold text-accent hover:text-accent-bright disabled:opacity-50"
                   :disabled="fixedMealSaving"
                   @click="chooseFixedMeal(r.id)"
+                >
+                  選這個
+                </button>
+              </li>
+            </ul>
+          </div>
+
+          <div class="mt-4 rounded-xl border border-ink/10 p-3">
+            <p class="text-sm font-semibold text-ink">午餐 / 晚餐（兩人共用）</p>
+            <p class="mt-1 text-xs text-tea">固定其中一個類別的菜（例如「午餐主食固定吃白飯」），兩人共用同一道，只依熱量調整份量</p>
+            <div v-for="mt in SHARED_FIXED_MEAL_TYPES" :key="mt" class="mt-2">
+              <p class="text-xs font-semibold text-tea">{{ mealTypeLabel(mt) }}</p>
+              <div v-for="cat in SHARED_MEAL_CATEGORIES" :key="cat" class="mt-1 flex items-center gap-2">
+                <span class="w-14 shrink-0 text-xs text-tea">{{ cat }}</span>
+                <span class="min-w-0 flex-1 truncate text-sm text-ink">
+                  {{ sharedFixedMealFor(mt, cat)?.recipe_name ?? '未固定' }}
+                  <span v-if="sharedFixedMealFor(mt, cat)" class="text-tea">{{ fixedMealStatusLabel(sharedFixedMealFor(mt, cat)!) }}</span>
+                </span>
+                <button
+                  v-if="sharedFixedMealFor(mt, cat)"
+                  type="button"
+                  class="shrink-0 text-xs text-tea hover:text-alert"
+                  @click="removeSharedFixedMeal(sharedFixedMealFor(mt, cat)!.id)"
+                >
+                  取消
+                </button>
+                <button
+                  v-else
+                  type="button"
+                  class="shrink-0 text-xs font-semibold text-accent hover:text-accent-bright"
+                  @click="openSharedFixedMealPicker(mt, cat)"
+                >
+                  設定
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="sharedFixedMealPickerTarget" class="mt-3 rounded-xl border border-accent bg-accent-tint/50 p-3">
+            <div class="flex items-center justify-between">
+              <p class="text-xs text-ink">
+                選一個「{{ sharedFixedMealPickerTarget.category }}」類的食譜當作固定的{{ mealTypeLabel(sharedFixedMealPickerTarget.mealType) }}{{ sharedFixedMealPickerTarget.category }}
+              </p>
+              <button type="button" class="text-xs text-tea hover:text-ink" @click="closeSharedFixedMealPicker">關閉</button>
+            </div>
+            <div class="mt-2 flex items-center gap-2">
+              <label class="shrink-0 text-xs text-tea">執行天數</label>
+              <input
+                v-model="sharedFixedMealDurationDays"
+                type="number"
+                min="1"
+                placeholder="留空＝永久"
+                class="w-24 rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink"
+              />
+              <span class="text-xs text-tea">天（留空表示永久套用直到手動取消）</span>
+            </div>
+            <div class="mt-2 flex gap-2">
+              <input
+                v-model="sharedFixedMealQuery"
+                type="text"
+                placeholder="食譜名稱"
+                class="w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink"
+                @keydown.enter="runSharedFixedMealSearch"
+              />
+              <button
+                type="button"
+                class="shrink-0 rounded-lg border border-ink/15 px-3 py-2 text-xs font-semibold text-ink hover:bg-bg disabled:opacity-50"
+                :disabled="sharedFixedMealSearching"
+                @click="runSharedFixedMealSearch"
+              >
+                {{ sharedFixedMealSearching ? '搜尋中…' : '搜尋' }}
+              </button>
+            </div>
+            <ul v-if="sharedFixedMealResults.length" class="mt-2 divide-y divide-ink/10">
+              <li v-for="r in sharedFixedMealResults" :key="r.id" class="flex items-center justify-between py-1.5 text-sm">
+                <span class="text-ink">{{ r.recipe_name }}<span class="text-tea">（{{ r.category }}）</span></span>
+                <button
+                  type="button"
+                  class="text-xs font-semibold text-accent hover:text-accent-bright disabled:opacity-50"
+                  :disabled="sharedFixedMealSaving"
+                  @click="chooseSharedFixedMeal(r.id)"
                 >
                   選這個
                 </button>

@@ -37,15 +37,24 @@ def set_manual_calories_target(user_id: int, payload: SetManualCaloriesTargetReq
 
 @router.get("/fixed-meal-preferences")
 def list_fixed_meal_preferences(user_id: int, db: Session = Depends(get_db)):
-    """列出某使用者固定吃的餐點設定（目前只支援 breakfast / afternoon_snack）"""
+    """列出某使用者固定吃的餐點設定（早餐/下午茶，個人餐點）"""
     return fixed_meal_preference_service.list_for_user(db, user_id)
+
+
+@router.get("/fixed-meal-preferences/shared")
+def list_shared_fixed_meal_preferences(db: Session = Depends(get_db)):
+    """列出午餐/晚餐固定餐點設定（兩人共用，固定其中一個類別：主食/肉/菜/湯）"""
+    return fixed_meal_preference_service.list_shared(db)
 
 
 @router.put("/fixed-meal-preferences")
 def set_fixed_meal_preference(payload: SetFixedMealPreferenceRequest, db: Session = Depends(get_db)):
-    """設定（或更新）某使用者某一餐固定吃的食譜；下次產生週菜單這一餐就直接套用，只調整份量"""
+    """設定（或更新）固定吃的食譜；下次產生週菜單就直接套用，只調整份量。早餐/下午茶要指定 user_id
+    （一人一份），午餐/晚餐不用指定 user_id（兩人共用，固定的類別依食譜的 category 自動帶入）"""
     try:
-        return fixed_meal_preference_service.set_preference(db, payload.user_id, payload.meal_type, payload.recipe_id)
+        return fixed_meal_preference_service.set_preference(
+            db, payload.meal_type, payload.recipe_id, payload.user_id, payload.duration_days
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

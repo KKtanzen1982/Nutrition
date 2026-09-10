@@ -11,10 +11,15 @@ from meal_plans.models import (
     ExcludedRecipe, FavoriteRecipe, SoupDayPreference,
 )
 from shopping.models import ShoppingList
-from meal_plans.schemas import FIXED_MEAL_TYPES
+from meal_plans.schemas import FIXED_MEAL_TYPES, SHARED_FIXED_MEAL_TYPES, ALL_FIXED_MEAL_TYPES
 from meal_plans import nutrition_calc
-from meal_plans.selection_algorithm import generate_week_plan, build_day_meals, scale_recipe, MEAL_SHARES, CATEGORY_VARIETY_CAP
+from meal_plans.selection_algorithm import (
+    generate_week_plan, build_day_meals, scale_recipe, MEAL_SHARES, CATEGORY_VARIETY_CAP,
+    LUNCH_DINNER_CATEGORIES_WITH_SOUP,
+)
 from meal_plans.prep_planner import build_prep_plan
+
+SHARED_MEAL_CATEGORIES = {cat for cat, _ in LUNCH_DINNER_CATEGORIES_WITH_SOUP}  # {"主食","肉","菜","湯"}
 
 
 def _parse_csv(text: Optional[str]) -> List[str]:
@@ -166,39 +171,79 @@ soup_day_preference_service = SoupDayPreferenceService()
 
 
 class FixedMealPreferenceService:
-    """使用者固定餐點設定（例如「我早餐固定吃燕麥牛奶粥」），產生週菜單時優先套用，
-    只調整份量、不會被規則式演算法換成別的食譜。"""
+    """固定餐點設定（例如「我早餐固定吃燕麥牛奶粥」「午餐主食固定吃白飯」），產生週菜單時優先套用，
+    只調整份量、不會被規則式演算法換成別的食譜。早餐/下午茶是個人餐點（見 FIXED_MEAL_TYPES），
+    午餐/晚餐是兩人共用餐點，固定的是其中一個類別的菜（見 SHARED_FIXED_MEAL_TYPES / SHARED_MEAL_CATEGORIES），
+    類別依選定食譜的 category 自動帶入，不需要另外指定。"""
+
+    def _end_date(self, row: FixedMealPreference) -> Optional[date]:
+        if row.duration_days is None:
+            return None
+        return row.start_date + timedelta(days=row.duration_days - 1)
+
+    def _is_active_on(self, row: FixedMealPreference, target_date: date) -> bool:
+        if target_date < row.start_date:
+            return False
+        end_date = self._end_date(row)
+        return end_date is None or target_date <= end_date
+
+    def _to_dict(self, row: FixedMealPreference, recipe: Optional[Recipe]) -> Dict:
+        return {
+            "id": row.id, "user_id": row.user_id, "meal_type": row.meal_type, "category": row.category,
+            "recipe_id": row.recipe_id, "recipe_name": recipe.recipe_name if recipe else None,
+            "start_date": row.start_date, "duration_days": row.duration_days, "end_date": self._end_date(row),
+        }
 
     def list_for_user(self, db: Session, user_id: int) -> List[Dict]:
+        """早餐/下午茶：某使用者的個人設定"""
         rows = db.query(FixedMealPreference).filter(FixedMealPreference.user_id == user_id).all()
-        result = []
-        for r in rows:
-            recipe = db.get(Recipe, r.recipe_id)
-            result.append({
-                "id": r.id, "user_id": r.user_id, "meal_type": r.meal_type,
-                "recipe_id": r.recipe_id, "recipe_name": recipe.recipe_name if recipe else None,
-            })
-        return result
+        return [self._to_dict(r, db.get(Recipe, r.recipe_id)) for r in rows]
 
-    def set_preference(self, db: Session, user_id: int, meal_type: str, recipe_id: int) -> Dict:
-        if meal_type not in FIXED_MEAL_TYPES:
-            raise ValueError(f"meal_type 必須是 {FIXED_MEAL_TYPES} 其中之一")
-        if not db.get(Recipe, recipe_id):
+    def list_shared(self, db: Session) -> List[Dict]:
+        """午餐/晚餐：兩人共用的設定，不分誰"""
+        rows = db.query(FixedMealPreference).filter(FixedMealPreference.meal_type.in_(SHARED_FIXED_MEAL_TYPES)).all()
+        return [self._to_dict(r, db.get(Recipe, r.recipe_id)) for r in rows]
+
+    def set_preference(self, db: Session, meal_type: str, recipe_id: int, user_id: Optional[int] = None,
+                        duration_days: Optional[int] = None) -> Dict:
+        if meal_type not in ALL_FIXED_MEAL_TYPES:
+            raise ValueError(f"meal_type 必須是 {ALL_FIXED_MEAL_TYPES} 其中之一")
+        recipe = db.get(Recipe, recipe_id)
+        if not recipe:
             raise ValueError(f"食譜 {recipe_id} 不存在")
 
-        existing = db.query(FixedMealPreference).filter(
-            FixedMealPreference.user_id == user_id, FixedMealPreference.meal_type == meal_type
-        ).first()
+        if meal_type in SHARED_FIXED_MEAL_TYPES:
+            if recipe.category not in SHARED_MEAL_CATEGORIES:
+                raise ValueError(f"{meal_type} 只能固定類別為 {sorted(SHARED_MEAL_CATEGORIES)} 的食譜，這道食譜的類別是「{recipe.category}」")
+            category = recipe.category
+            user_id = None
+            existing = db.query(FixedMealPreference).filter(
+                FixedMealPreference.meal_type == meal_type, FixedMealPreference.category == category,
+            ).first()
+        else:
+            if not user_id:
+                raise ValueError(f"{meal_type} 需指定 user_id")
+            category = None
+            existing = db.query(FixedMealPreference).filter(
+                FixedMealPreference.user_id == user_id, FixedMealPreference.meal_type == meal_type,
+            ).first()
+
+        today = date.today()
         if existing:
             existing.recipe_id = recipe_id
+            existing.category = category
+            existing.start_date = today
+            existing.duration_days = duration_days
             row = existing
         else:
-            row = FixedMealPreference(user_id=user_id, meal_type=meal_type, recipe_id=recipe_id)
+            row = FixedMealPreference(
+                user_id=user_id, meal_type=meal_type, category=category, recipe_id=recipe_id,
+                start_date=today, duration_days=duration_days,
+            )
             db.add(row)
         db.commit()
         db.refresh(row)
-        recipe = db.get(Recipe, recipe_id)
-        return {"id": row.id, "user_id": row.user_id, "meal_type": row.meal_type, "recipe_id": row.recipe_id, "recipe_name": recipe.recipe_name}
+        return self._to_dict(row, recipe)
 
     def delete_preference(self, db: Session, preference_id: int) -> bool:
         row = db.get(FixedMealPreference, preference_id)
@@ -208,15 +253,27 @@ class FixedMealPreferenceService:
         db.commit()
         return True
 
-    def build_preferred_recipes(self, db: Session, user_id_a: int, user_id_b: int) -> Dict:
-        """回傳 selection_algorithm 要的格式：{(meal_type, 'A'|'B'): candidate_dict}"""
+    def build_preferred_recipes(self, db: Session, user_id_a: int, user_id_b: int, target_date: date) -> Dict:
+        """回傳 selection_algorithm 要的格式：早餐/下午茶鍵為 (meal_type, 'A'|'B')，午餐/晚餐鍵為
+        (meal_type, category)（兩人共用，不分誰）。只納入 target_date 落在 start_date ~
+        start_date+duration_days-1 這段區間內的設定（duration_days 為 None 表示沒有上限，只受 start_date 限制）。"""
         preferred: Dict = {}
         for user_key, user_id in (("A", user_id_a), ("B", user_id_b)):
             rows = db.query(FixedMealPreference).filter(FixedMealPreference.user_id == user_id).all()
             for r in rows:
+                if not self._is_active_on(r, target_date):
+                    continue
                 recipe = db.get(Recipe, r.recipe_id)
                 if recipe:
                     preferred[(r.meal_type, user_key)] = _recipe_to_candidate(recipe)
+
+        shared_rows = db.query(FixedMealPreference).filter(FixedMealPreference.meal_type.in_(SHARED_FIXED_MEAL_TYPES)).all()
+        for r in shared_rows:
+            if not self._is_active_on(r, target_date):
+                continue
+            recipe = db.get(Recipe, r.recipe_id)
+            if recipe:
+                preferred[(r.meal_type, r.category)] = _recipe_to_candidate(recipe)
         return preferred
 
 
@@ -349,11 +406,15 @@ class MealPlanService:
         candidates = self._candidate_recipes(db, user_id_a, user_id_b, week_start_date)
         if not candidates:
             raise ValueError("目前沒有符合過敏/飲食限制的候選食譜，無法生成推薦")
-        preferred_recipes = fixed_meal_preference_service.build_preferred_recipes(db, user_id_a, user_id_b)
+        preferred_recipes_by_day = {
+            week_start_date + timedelta(days=i):
+                fixed_meal_preference_service.build_preferred_recipes(db, user_id_a, user_id_b, week_start_date + timedelta(days=i))
+            for i in range(7)
+        }
         favorite_ids = favorite_recipe_service.favorite_recipe_ids(db, user_id_a, user_id_b)
         soup_days = soup_day_preference_service.soup_days(db)
 
-        days = generate_week_plan(candidates, ctx_a, ctx_b, week_start_date, preferred_recipes=preferred_recipes,
+        days = generate_week_plan(candidates, ctx_a, ctx_b, week_start_date, preferred_recipes_by_day=preferred_recipes_by_day,
                                    favorite_recipe_ids=favorite_ids, soup_days=soup_days)
 
         plan = WeeklyMealPlan(
@@ -534,7 +595,7 @@ class MealPlanService:
             db.delete(m)
         db.flush()
 
-        preferred_recipes = fixed_meal_preference_service.build_preferred_recipes(db, plan.user_id_a, plan.user_id_b)
+        preferred_recipes = fixed_meal_preference_service.build_preferred_recipes(db, plan.user_id_a, plan.user_id_b, meal_date)
         favorite_ids = favorite_recipe_service.favorite_recipe_ids(db, plan.user_id_a, plan.user_id_b)
         soup_days = soup_day_preference_service.soup_days(db)
         meals, _, _ = build_day_meals(candidates, ctx_a, ctx_b, meal_date, usage_counter, cost_counter, yesterday_ids,

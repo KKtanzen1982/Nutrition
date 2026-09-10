@@ -33,13 +33,16 @@ class RegenerateDayRequest(BaseModel):
     meal_date: date
 
 
-FIXED_MEAL_TYPES = ("breakfast", "afternoon_snack")
+FIXED_MEAL_TYPES = ("breakfast", "afternoon_snack")  # 個人餐點，一人一份（add_dish/remove_dish 也用這個判斷要不要指定 user_id）
+SHARED_FIXED_MEAL_TYPES = ("lunch", "dinner")  # 兩人共用餐點：固定其中一個類別（主食/肉/菜/湯），不分誰吃
+ALL_FIXED_MEAL_TYPES = FIXED_MEAL_TYPES + SHARED_FIXED_MEAL_TYPES
 
 
 class SetFixedMealPreferenceRequest(BaseModel):
-    user_id: int
-    meal_type: str
     recipe_id: int
+    meal_type: str
+    user_id: Optional[int] = None  # breakfast/afternoon_snack 必填；lunch/dinner 不需要（兩人共用，忽略）
+    duration_days: Optional[int] = Field(None, ge=1, description="要連續套用幾天，從設定當天算起；不填則永久套用直到手動取消")
 
 
 class SetExcludedRecipeRequest(BaseModel):

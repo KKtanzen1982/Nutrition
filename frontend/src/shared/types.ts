@@ -323,13 +323,19 @@ export interface MealPlanDetail {
 }
 
 export type FixedMealType = 'breakfast' | 'afternoon_snack'
+export type SharedFixedMealType = 'lunch' | 'dinner'
+export type SharedMealCategory = '主食' | '肉' | '菜' | '湯'
 
 export interface FixedMealPreference {
   id: number
-  user_id: number
-  meal_type: FixedMealType
+  user_id: number | null
+  meal_type: FixedMealType | SharedFixedMealType
+  category: SharedMealCategory | null
   recipe_id: number
   recipe_name: string | null
+  start_date: string
+  duration_days: number | null
+  end_date: string | null
 }
 
 export interface ExcludedRecipe {

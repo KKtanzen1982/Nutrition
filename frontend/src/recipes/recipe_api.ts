@@ -11,8 +11,8 @@ import type {
   UpdateRecipePayload,
 } from '../shared/types'
 
-export function searchRecipesByName(query: string): Promise<RecipeSearchResult[]> {
-  return apiGet<RecipeSearchResult[]>('/recipes/search', { query, search_by: 'name' })
+export function searchRecipesByName(query: string, category?: string): Promise<RecipeSearchResult[]> {
+  return apiGet<RecipeSearchResult[]>('/recipes/search', { query, search_by: 'name', category })
 }
 
 export function listRecipes(

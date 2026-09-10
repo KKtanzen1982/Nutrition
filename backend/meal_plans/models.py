@@ -2,7 +2,7 @@
 
 from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, date
 
 from database import Base
 
@@ -45,16 +45,29 @@ class DailyMealDetail(Base):
 
 
 class FixedMealPreference(Base):
-    """使用者固定吃的餐點（例如「我早餐固定吃燕麥牛奶粥」）：產生週菜單時這一餐直接套用這份食譜，
-    只依當天熱量目標調整份量，不會被規則式選餐演算法換掉。目前只開放 breakfast / afternoon_snack，
-    午餐晚餐是兩人共用的主食+肉+菜組合，固定单一食譜的語意不適用。"""
+    """固定吃的餐點（例如「我早餐固定吃燕麥牛奶粥」）：產生週菜單時這一餐直接套用這份食譜，
+    只依當天熱量目標調整份量，不會被規則式選餐演算法換掉。
+
+    早餐/下午茶（breakfast/afternoon_snack）是個人餐點，user_id 必填、category 留空，
+    一人一份設定（uq user_id+meal_type）。午餐/晚餐（lunch/dinner）是兩人共用的主食+肉+菜(+湯)
+    組合，固定的是其中一個類別的菜（例如「午餐主食固定吃白飯」），user_id 留空（不分誰），
+    category 必填（依選定食譜的 category 自動帶入），一個 meal_type+category 一份設定，
+    兩者用不同的鍵所以沒有共用同一個 DB UniqueConstraint，唯一性由 FixedMealPreferenceService
+    的查詢比對（找到就更新、找不到才新增）保證。
+
+    start_date + duration_days：可選的執行天數限制，從設定當下算起連續套用幾天，超過天數後
+    這一餐自動改回規則式演算法選餐（不用手動刪除）。duration_days 為 None 表示永久套用，
+    維持既有行為（向下相容）。"""
 
     __tablename__ = "fixed_meal_preferences"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     meal_type = Column(String(20), nullable=False)
+    category = Column(String(20), nullable=True)
     recipe_id = Column(Integer, ForeignKey("recipes.id"), nullable=False)
+    start_date = Column(Date, nullable=False, default=date.today)
+    duration_days = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

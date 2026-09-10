@@ -27,7 +27,7 @@ OVERSHOOT_PENALTY_MULTIPLIER = 1.5  # 熱量超過目標比不足目標扣更多
 
 # 整週菜色多樣性上限：這幾個類別一週最多出現幾種「不同」食譜（不是次數上限，是種類上限）。
 # 一旦某類別已經用滿上限種類，候選池會限縮成只剩已經用過的那幾種，之後只在這幾種裡面選。
-CATEGORY_VARIETY_CAP = {"肉": 3, "菜": 5, "下午茶": 2}
+CATEGORY_VARIETY_CAP = {"主食": 3, "肉": 3, "菜": 3, "下午茶": 2}
 
 # 主食白飯規則：週一到週五中午是便當（見 prep_planner.py），便當主食一律白飯，方便備料；
 # 其他餐（週末午餐＋每天晚餐）白飯占比抓 80%，用累積比例決定每一格要不要白飯，維持「同輸入跑兩次結果一致」。
@@ -229,15 +229,21 @@ def build_day_meals(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dict, 
                 else:
                     exclude_carb_source = BENTO_CARB_SOURCE
 
-            # 兩人熱量目標常差很多，選菜時看兩人各自的偏差（worst-case），不是只看平均值，
-            # 避免熱量需求較低那方的份量之後被迫縮到 SERVING_SCALE_MIN 下限、實際熱量超出他自己的目標
-            recipe = select_recipe_for_slot(candidates, category, a_slot_cal, a_slot_protein,
-                                             usage_counter, cost_counter, yesterday_recipe_ids,
-                                             favorite_recipe_ids, yesterday_carb_sources, weekly_variety,
-                                             secondary_target=(b_slot_cal, b_slot_protein),
-                                             require_carb_source=require_carb_source,
-                                             exclude_carb_source=exclude_carb_source,
-                                             require_recipe_name_in=require_recipe_name_in)
+            # 這個類別有固定餐點設定（見 FixedMealPreference）：直接套用，不跑選餐演算法，
+            # 也就不受白飯規則/重複次數/成本比例限制——使用者刻意固定的選擇，尊重到底。
+            preferred = preferred_recipes.get((meal_type, category))
+            if preferred:
+                recipe = preferred
+            else:
+                # 兩人熱量目標常差很多，選菜時看兩人各自的偏差（worst-case），不是只看平均值，
+                # 避免熱量需求較低那方的份量之後被迫縮到 SERVING_SCALE_MIN 下限、實際熱量超出他自己的目標
+                recipe = select_recipe_for_slot(candidates, category, a_slot_cal, a_slot_protein,
+                                                 usage_counter, cost_counter, yesterday_recipe_ids,
+                                                 favorite_recipe_ids, yesterday_carb_sources, weekly_variety,
+                                                 secondary_target=(b_slot_cal, b_slot_protein),
+                                                 require_carb_source=require_carb_source,
+                                                 exclude_carb_source=exclude_carb_source,
+                                                 require_recipe_name_in=require_recipe_name_in)
             if not recipe:
                 continue
             today_recipe_ids.add(recipe["id"])
@@ -256,9 +262,12 @@ def build_day_meals(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dict, 
 
 
 def generate_week_plan(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dict, week_start_date,
-                        preferred_recipes: Optional[Dict[Tuple[str, str], Dict]] = None,
+                        preferred_recipes_by_day: Optional[Dict] = None,
                         favorite_recipe_ids: Optional[Set[int]] = None,
                         soup_days: Optional[Set[int]] = None) -> List[Dict]:
+    """preferred_recipes_by_day: {date: {(meal_type, 'A'|'B'): candidate_dict}}——固定餐點設定可以有
+    「執行天數」限制（見 FixedMealPreference），所以每天套用的固定餐點不一定相同，改由呼叫端
+    （MealPlanService）依日期算好每天各自的 preferred_recipes 再傳進來，這裡逐天取當天那份。"""
     usage_counter: Dict[int, int] = {}
     cost_counter: Dict[str, int] = {}
     yesterday_ids: Set[int] = set()
@@ -266,12 +275,13 @@ def generate_week_plan(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dic
     weekly_variety: Dict[str, Set[int]] = {}
     other_meal_rice_tracker: Dict[str, int] = {"rice": 0, "total": 0}
     soup_days = soup_days or set()
+    preferred_recipes_by_day = preferred_recipes_by_day or {}
     days = []
     for i in range(7):
         d = week_start_date + timedelta(days=i)
         meals, today_ids, today_carb_sources = build_day_meals(
             candidates, user_a_ctx, user_b_ctx, d, usage_counter, cost_counter, yesterday_ids,
-            preferred_recipes=preferred_recipes, favorite_recipe_ids=favorite_recipe_ids,
+            preferred_recipes=preferred_recipes_by_day.get(d), favorite_recipe_ids=favorite_recipe_ids,
             yesterday_carb_sources=yesterday_carb_sources, include_soup=d.weekday() in soup_days,
             weekly_variety=weekly_variety, other_meal_rice_tracker=other_meal_rice_tracker,
         )

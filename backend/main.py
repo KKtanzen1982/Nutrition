@@ -111,6 +111,11 @@ def _add_missing_columns():
         conn.execute(text("ALTER TABLE recipes ADD COLUMN IF NOT EXISTS carb_source VARCHAR(20)"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS manual_calories_target FLOAT"))
         conn.execute(text("ALTER TABLE ingredient_library ADD COLUMN IF NOT EXISTS season VARCHAR(20)"))
+        conn.execute(text("ALTER TABLE fixed_meal_preferences ADD COLUMN IF NOT EXISTS start_date DATE NOT NULL DEFAULT CURRENT_DATE"))
+        conn.execute(text("ALTER TABLE fixed_meal_preferences ADD COLUMN IF NOT EXISTS duration_days INTEGER"))
+        conn.execute(text("ALTER TABLE fixed_meal_preferences ADD COLUMN IF NOT EXISTS category VARCHAR(20)"))
+        # 午餐/晚餐固定餐點是兩人共用（不分誰），user_id 存 NULL；舊表原本是 NOT NULL，這裡放寬限制
+        conn.execute(text("ALTER TABLE fixed_meal_preferences ALTER COLUMN user_id DROP NOT NULL"))
         conn.commit()
 
 
