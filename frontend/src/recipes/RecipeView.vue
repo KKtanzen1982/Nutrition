@@ -143,6 +143,7 @@ async function openDetail(id: number) {
   detail.value = null
   detailLoading.value = true
   detailError.value = null
+  resetDetailEditingState()
   try {
     detail.value = await fetchRecipe(id)
   } catch (e) {
@@ -155,6 +156,17 @@ async function openDetail(id: number) {
 function closeDetail() {
   selectedId.value = null
   detail.value = null
+  resetDetailEditingState()
+}
+
+// 切換/關閉詳情面板時要把上一個食譜殘留的編輯狀態清掉，不然重開一個食譜的詳情會直接卡在
+// 「編輯中」畫面、顯示上一筆的舊資料（basicForm 沒有重新從新食譜的 detail 抓值）
+function resetDetailEditingState() {
+  editingBasic.value = false
+  editingIngredients.value = false
+  showAddStepVersion.value = false
+  newStepRows.value = ['']
+  addStepVersionError.value = null
 }
 
 // GET /recipes/:id 的 steps 其實是「所有版本」混在一起（後端 Recipe.steps 關聯沒有過濾 is_current），
