@@ -546,6 +546,7 @@ export interface Ingredient {
   preferred_purchase_location: string | null
   needs_stock_tracking: boolean
   season: string | null
+  cost_level: string | null
   created_at: string
   stock: IngredientStock | null
 }
@@ -562,6 +563,7 @@ export interface IngredientSearchResult {
   fiber_per_100g: number | null
   needs_stock_tracking: boolean
   season?: string | null
+  cost_level?: string | null
 }
 
 export interface LowStockIngredient {
@@ -587,6 +589,7 @@ export interface CreateIngredientPayload {
   preferred_purchase_location?: string | null
   needs_stock_tracking?: boolean
   season?: string | null
+  cost_level?: string | null
 }
 
 export type UpdateIngredientPayload = Partial<CreateIngredientPayload>
@@ -635,6 +638,7 @@ export interface RecipeDetail {
   category: string
   base_weight_g: number
   cost_level: string
+  cost_level_manual: boolean
   is_active: boolean
   pairing_style: string | null
   created_at: string
@@ -650,6 +654,7 @@ export interface RecipeListEntry {
   category: string
   base_weight_g: number
   cost_level: string
+  cost_level_manual: boolean
   is_active: boolean
   is_vegetarian: boolean
   carb_source: string | null
@@ -676,7 +681,8 @@ export interface CreateRecipePayload {
   recipe_name: string
   category: string
   base_weight_g: number
-  cost_level: string
+  // 不填的話後端會依食材中最高的 cost_level 自動算出；有填視為手動指定
+  cost_level?: string | null
   pairing_style?: string | null
   ingredients: CreateRecipeIngredientPayload[]
   steps: CreateRecipeStepPayload[]
@@ -686,6 +692,8 @@ export interface UpdateRecipePayload {
   recipe_name?: string
   category?: string
   base_weight_g?: number
+  // 帶這個欄位會設 cost_level_manual=True（視為手動覆蓋），一般編輯基本資料不要帶，
+  // 避免使用者沒動過的自動算值被意外鎖死——只有專門的「調整成本等級」控制項才會送這個欄位
   cost_level?: string
   is_active?: boolean
   pairing_style?: string | null

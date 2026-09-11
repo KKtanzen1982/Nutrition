@@ -15,6 +15,7 @@ class IngredientCreate(BaseModel):
     preferred_purchase_location: Optional[str] = None
     needs_stock_tracking: bool = False
     season: Optional[str] = None  # 盛產季節（春/夏/秋/冬，逗號分隔），只有蔬果類需要填；不分季節的留空
+    cost_level: Optional[str] = None  # 低/中/高，用這道食材的食譜會依食材中最高的等級自動算出成本等級
 
 
 class IngredientUpdate(BaseModel):
@@ -29,6 +30,7 @@ class IngredientUpdate(BaseModel):
     preferred_purchase_location: Optional[str] = None
     needs_stock_tracking: Optional[bool] = None
     season: Optional[str] = None
+    cost_level: Optional[str] = None
 
 
 class IngredientStockUpdate(BaseModel):
@@ -52,7 +54,9 @@ class RecipeCreate(BaseModel):
     recipe_name: str = Field(..., min_length=1)
     category: str
     base_weight_g: int
-    cost_level: str
+    # 不填的話會依食材中最高的 cost_level 自動算出（見 RecipeService.calculate_nutrition）；
+    # 有填就視為手動指定，之後食材異動不會覆蓋掉這個值
+    cost_level: Optional[str] = None
     is_vegetarian: bool = False
     allergen_tags: Optional[str] = ""
     carb_source: Optional[str] = None  # 只有「主食」類會填（飯/麵/其他），供選餐演算法主食輪替/白飯規則判斷
@@ -65,6 +69,8 @@ class RecipeUpdate(BaseModel):
     recipe_name: Optional[str] = None
     category: Optional[str] = None
     base_weight_g: Optional[int] = None
+    # 有帶這個欄位就視為手動覆蓋（會設 cost_level_manual=True，之後食材異動不會再自動覆蓋掉），
+    # 一般編輯基本資料（改名稱/分類/重量）不要帶這欄，才不會把使用者沒動過的自動算值意外鎖死
     cost_level: Optional[str] = None
     is_vegetarian: Optional[bool] = None
     allergen_tags: Optional[str] = None
@@ -99,6 +105,7 @@ class IngredientResponse(BaseModel):
     preferred_purchase_location: Optional[str] = None
     needs_stock_tracking: bool
     season: Optional[str] = None
+    cost_level: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -147,6 +154,7 @@ class RecipeSummaryResponse(BaseModel):
     category: str
     base_weight_g: int
     cost_level: str
+    cost_level_manual: bool = False
     is_active: bool
     is_vegetarian: bool
     carb_source: Optional[str] = None
@@ -163,6 +171,7 @@ class RecipeResponse(BaseModel):
     category: str
     base_weight_g: int
     cost_level: str
+    cost_level_manual: bool = False
     is_active: bool
     is_vegetarian: bool
     allergen_tags: Optional[str] = None

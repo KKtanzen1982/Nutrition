@@ -17,6 +17,7 @@ import type { Ingredient, IngredientSearchResult, LowStockIngredient, PurchaseLo
 
 const CATEGORIES = ['蔬菜', '肉類', '穀物', '乳製品', '調味料', '其他']
 const SEASONS = ['春', '夏', '秋', '冬']
+const COST_LEVELS = ['低', '中', '高']
 
 function parseSeasonCsv(season: string | null | undefined): string[] {
   return (season ?? '').split(',').map((s) => s.trim()).filter(Boolean)
@@ -120,6 +121,7 @@ const editForm = reactive<{
   current_quantity_g: number | null
   min_threshold_g: number | null
   season: string[]
+  cost_level: string
 }>({
   ingredient_name: '',
   category: CATEGORIES[0],
@@ -133,6 +135,7 @@ const editForm = reactive<{
   current_quantity_g: null,
   min_threshold_g: null,
   season: [],
+  cost_level: '',
 })
 const savingEdit = ref(false)
 const editError = ref<string | null>(null)
@@ -152,6 +155,7 @@ function startEdit(item: Ingredient) {
     current_quantity_g: item.stock?.current_quantity_g ?? null,
     min_threshold_g: item.stock?.min_threshold_g ?? null,
     season: parseSeasonCsv(item.season),
+    cost_level: item.cost_level ?? '',
   })
   editError.value = null
   loadLocationPreferences(item.id)
@@ -237,6 +241,7 @@ async function submitEdit(item: Ingredient) {
       fiber_per_100g: editForm.fiber_per_100g,
       needs_stock_tracking: editForm.needs_stock_tracking,
       season: editForm.season.length ? editForm.season.join(',') : null,
+      cost_level: editForm.cost_level || null,
     })
     if (editForm.needs_stock_tracking) {
       await updateIngredientStock(item.id, {
@@ -266,6 +271,7 @@ const createForm = reactive({
   fiber_per_100g: null as number | null,
   needs_stock_tracking: false,
   season: [] as string[],
+  cost_level: '',
 })
 const creating = ref(false)
 const createError = ref<string | null>(null)
@@ -275,7 +281,11 @@ async function submitCreate() {
   creating.value = true
   createError.value = null
   try {
-    await createIngredient({ ...createForm, season: createForm.season.length ? createForm.season.join(',') : null })
+    await createIngredient({
+      ...createForm,
+      season: createForm.season.length ? createForm.season.join(',') : null,
+      cost_level: createForm.cost_level || null,
+    })
     createForm.ingredient_name = ''
     createForm.calories_per_100g = null
     createForm.protein_per_100g = null
@@ -284,6 +294,7 @@ async function submitCreate() {
     createForm.fiber_per_100g = null
     createForm.needs_stock_tracking = false
     createForm.season = []
+    createForm.cost_level = ''
     showCreate.value = false
     page.value = 1
     reload()
@@ -322,6 +333,10 @@ async function submitCreate() {
         <input v-model="createForm.ingredient_name" type="text" placeholder="食材名稱" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink sm:col-span-2" />
         <select v-model="createForm.category" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink">
           <option v-for="c in CATEGORIES" :key="c" :value="c">{{ c }}</option>
+        </select>
+        <select v-model="createForm.cost_level" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink">
+          <option value="">成本等級（未設定）</option>
+          <option v-for="c in COST_LEVELS" :key="c" :value="c">{{ c }}</option>
         </select>
         <input v-model.number="createForm.calories_per_100g" type="number" placeholder="熱量 /100g" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
         <input v-model.number="createForm.protein_per_100g" type="number" placeholder="蛋白質 /100g" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
@@ -393,6 +408,7 @@ async function submitCreate() {
               <p class="text-sm text-ink">{{ item.ingredient_name }}</p>
               <p class="text-xs text-tea">
                 {{ item.category }} · {{ item.calories_per_100g ?? '—' }} kcal/100g
+                <span v-if="item.cost_level"> · 成本{{ item.cost_level }}</span>
                 <span v-if="item.season">· {{ item.season }}盛產</span>
                 <span v-if="item.needs_stock_tracking && item.stock"> · 庫存 {{ item.stock.current_quantity_g }}{{ item.stock.unit }}</span>
               </p>
@@ -410,6 +426,10 @@ async function submitCreate() {
             <input v-model="editForm.ingredient_name" type="text" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink sm:col-span-2" />
             <select v-model="editForm.category" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink">
               <option v-for="c in CATEGORIES" :key="c" :value="c">{{ c }}</option>
+            </select>
+            <select v-model="editForm.cost_level" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink">
+              <option value="">成本等級（未設定）</option>
+              <option v-for="c in COST_LEVELS" :key="c" :value="c">{{ c }}</option>
             </select>
             <input v-model.number="editForm.calories_per_100g" type="number" placeholder="熱量 /100g" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
             <input v-model.number="editForm.protein_per_100g" type="number" placeholder="蛋白質 /100g" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import AddIngredientModal from './AddIngredientModal.vue'
 import { searchIngredientsByName } from './ingredient_api'
 import {
   addRecipeStepsVersion,
@@ -14,7 +15,7 @@ import {
   updateRecipeIngredients,
 } from './recipe_api'
 import { useConfirmDialog } from '../shared/useConfirmDialog'
-import type { IngredientSearchResult, RecipeDetail, RecipeListEntry, RecipeSearchResult } from '../shared/types'
+import type { Ingredient, IngredientSearchResult, RecipeDetail, RecipeListEntry, RecipeSearchResult } from '../shared/types'
 
 const { confirmDialog } = useConfirmDialog()
 
@@ -163,6 +164,7 @@ function closeDetail() {
 // 「編輯中」畫面、顯示上一筆的舊資料（basicForm 沒有重新從新食譜的 detail 抓值）
 function resetDetailEditingState() {
   editingBasic.value = false
+  editingCostLevel.value = false
   editingIngredients.value = false
   showAddStepVersion.value = false
   newStepRows.value = ['']
@@ -241,7 +243,7 @@ async function submitAddStepVersion() {
 }
 
 const editingBasic = ref(false)
-const basicForm = reactive({ recipe_name: '', category: '', base_weight_g: 0, cost_level: '', pairing_style: '' })
+const basicForm = reactive({ recipe_name: '', category: '', base_weight_g: 0, pairing_style: '' })
 const savingBasic = ref(false)
 
 function startEditBasic() {
@@ -250,7 +252,6 @@ function startEditBasic() {
     recipe_name: detail.value.recipe_name,
     category: detail.value.category,
     base_weight_g: detail.value.base_weight_g,
-    cost_level: detail.value.cost_level,
     pairing_style: detail.value.pairing_style ?? '',
   })
   editingBasic.value = true
@@ -261,6 +262,8 @@ async function submitEditBasic() {
   savingBasic.value = true
   detailError.value = null
   try {
+    // 這裡刻意不帶 cost_level：成本等級預設依食材自動算，要手動覆蓋走下面專門的
+    // 「調整成本等級」控制項，不要讓「隨手改個名稱」之類的一般編輯意外把自動算值鎖死
     detail.value = await updateRecipe(detail.value.id, {
       ...basicForm,
       pairing_style: PAIRING_STYLE_CATEGORIES.has(basicForm.category) ? basicForm.pairing_style || null : null,
@@ -271,6 +274,33 @@ async function submitEditBasic() {
     detailError.value = e instanceof Error ? e.message : '更新失敗'
   } finally {
     savingBasic.value = false
+  }
+}
+
+// ---- 成本等級手動覆蓋：跟編輯基本資料分開，避免改名稱/分類這種一般編輯意外送出 cost_level
+// 而被後端當成手動指定（見 update_recipe 的 cost_level_manual 判斷邏輯）----
+const editingCostLevel = ref(false)
+const costLevelForm = ref('')
+const savingCostLevel = ref(false)
+
+function startEditCostLevel() {
+  if (!detail.value) return
+  costLevelForm.value = detail.value.cost_level
+  editingCostLevel.value = true
+}
+
+async function submitCostLevel() {
+  if (!detail.value) return
+  savingCostLevel.value = true
+  detailError.value = null
+  try {
+    detail.value = await updateRecipe(detail.value.id, { cost_level: costLevelForm.value })
+    editingCostLevel.value = false
+    reload()
+  } catch (e) {
+    detailError.value = e instanceof Error ? e.message : '更新失敗'
+  } finally {
+    savingCostLevel.value = false
   }
 }
 
@@ -316,6 +346,24 @@ function addEditIngredientRow(ing: IngredientSearchResult) {
 }
 function removeEditIngredientRow(index: number) {
   editIngredientRows.value.splice(index, 1)
+}
+
+// ---- 找不到食材時可以就地新增，不用關掉正在編輯的食譜——新增食譜表單跟食材編輯區各自
+// 呼叫這裡，用 addIngredientModalTarget 記住是哪一邊要收到新食材（見 Modal.vue，蓋在最上層不會關掉底下的表單）----
+const showAddIngredientModal = ref(false)
+const addIngredientModalTarget = ref<'create' | 'edit'>('create')
+
+function openAddIngredientModal(target: 'create' | 'edit') {
+  addIngredientModalTarget.value = target
+  showAddIngredientModal.value = true
+}
+
+function onIngredientCreated(ingredient: Ingredient) {
+  if (addIngredientModalTarget.value === 'create') {
+    addIngredientRow(ingredient)
+  } else {
+    addEditIngredientRow(ingredient)
+  }
 }
 
 const canSubmitEditIngredients = computed(
@@ -370,7 +418,6 @@ const createForm = reactive({
   recipe_name: '',
   category: RECIPE_CATEGORIES[0],
   base_weight_g: null as number | null,
-  cost_level: COST_LEVELS[0],
   pairing_style: '',
 })
 const ingredientRows = ref<IngredientRow[]>([])
@@ -425,7 +472,7 @@ async function submitCreate() {
       recipe_name: createForm.recipe_name,
       category: createForm.category,
       base_weight_g: createForm.base_weight_g,
-      cost_level: createForm.cost_level,
+      // cost_level 不帶：交給後端依食材自動算（見 CreateRecipePayload 的註解）
       pairing_style: PAIRING_STYLE_CATEGORIES.has(createForm.category) ? createForm.pairing_style || null : null,
       ingredients: ingredientRows.value.map((r) => ({
         ingredient_id: r.ingredient_id,
@@ -476,9 +523,6 @@ async function submitCreate() {
         <select v-model="createForm.category" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink">
           <option v-for="c in RECIPE_CATEGORIES" :key="c" :value="c">{{ c }}</option>
         </select>
-        <select v-model="createForm.cost_level" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink">
-          <option v-for="c in COST_LEVELS" :key="c" :value="c">{{ c }}</option>
-        </select>
         <select
           v-if="PAIRING_STYLE_CATEGORIES.has(createForm.category)"
           v-model="createForm.pairing_style"
@@ -489,9 +533,15 @@ async function submitCreate() {
         </select>
         <input v-model.number="createForm.base_weight_g" type="number" placeholder="基礎重量 (g)" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink sm:col-span-4" />
       </div>
+      <p class="mt-2 text-xs text-tea">成本等級不用選，會依加入的食材自動算（食材裡最貴的等級），建立後也可以在詳情頁手動調整。</p>
 
       <div class="mt-4">
-        <p class="text-xs text-tea">食材（至少 1 種）</p>
+        <div class="flex items-center justify-between">
+          <p class="text-xs text-tea">食材（至少 1 種）</p>
+          <button type="button" class="text-xs font-semibold text-accent hover:text-accent-bright" @click="openAddIngredientModal('create')">
+            找不到？+ 新增食材
+          </button>
+        </div>
         <div class="mt-1 flex gap-2">
           <input
             v-model="ingSearchQuery"
@@ -639,7 +689,7 @@ async function submitCreate() {
       <template v-if="detail">
         <div v-if="!editingBasic" class="mt-3 flex items-center justify-between">
           <p class="text-xs text-tea">
-            {{ detail.category }} · {{ detail.cost_level }} · 基礎 {{ detail.base_weight_g }}g
+            {{ detail.category }} · 基礎 {{ detail.base_weight_g }}g
             <template v-if="detail.pairing_style"> · {{ detail.pairing_style }}</template>
           </p>
           <button type="button" class="text-xs font-semibold text-accent hover:text-accent-bright" @click="startEditBasic">編輯基本資料</button>
@@ -648,9 +698,6 @@ async function submitCreate() {
           <input v-model="basicForm.recipe_name" type="text" class="rounded border border-ink/15 bg-bg px-2 py-1 text-sm text-ink sm:col-span-2" />
           <select v-model="basicForm.category" class="rounded border border-ink/15 bg-bg px-2 py-1 text-sm text-ink">
             <option v-for="c in RECIPE_CATEGORIES" :key="c" :value="c">{{ c }}</option>
-          </select>
-          <select v-model="basicForm.cost_level" class="rounded border border-ink/15 bg-bg px-2 py-1 text-sm text-ink">
-            <option v-for="c in COST_LEVELS" :key="c" :value="c">{{ c }}</option>
           </select>
           <input v-model.number="basicForm.base_weight_g" type="number" class="rounded border border-ink/15 bg-bg px-2 py-1 text-sm text-ink" />
           <select
@@ -667,6 +714,23 @@ async function submitCreate() {
           <button type="button" class="text-xs text-tea" @click="editingBasic = false">取消</button>
         </div>
 
+        <div v-if="!editingCostLevel" class="mt-1 flex items-center justify-between">
+          <p class="text-xs text-tea">
+            成本 {{ detail.cost_level }}
+            <span class="text-tea/70">{{ detail.cost_level_manual ? '（手動設定）' : '（依食材自動）' }}</span>
+          </p>
+          <button type="button" class="text-xs font-semibold text-accent hover:text-accent-bright" @click="startEditCostLevel">調整成本等級</button>
+        </div>
+        <div v-else class="mt-1 flex items-center gap-2">
+          <select v-model="costLevelForm" class="rounded border border-ink/15 bg-bg px-2 py-1 text-sm text-ink">
+            <option v-for="c in COST_LEVELS" :key="c" :value="c">{{ c }}</option>
+          </select>
+          <button type="button" class="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-on-accent" :disabled="savingCostLevel" @click="submitCostLevel">
+            {{ savingCostLevel ? '儲存中…' : '儲存' }}
+          </button>
+          <button type="button" class="text-xs text-tea" @click="editingCostLevel = false">取消</button>
+        </div>
+
         <div class="mt-4">
           <div class="flex items-center justify-between">
             <p class="text-[11.5px] font-semibold uppercase tracking-wide text-muted">食材</p>
@@ -680,7 +744,13 @@ async function submitCreate() {
           </ul>
 
           <div v-else class="mt-2 rounded-lg border border-ink/10 bg-bg p-3">
-            <div class="flex gap-2">
+            <div class="flex items-center justify-between">
+              <p class="text-xs text-tea">找不到食材？</p>
+              <button type="button" class="text-xs font-semibold text-accent hover:text-accent-bright" @click="openAddIngredientModal('edit')">
+                + 新增食材
+              </button>
+            </div>
+            <div class="mt-1 flex gap-2">
               <input
                 v-model="editIngSearchQuery"
                 type="text"
@@ -812,5 +882,7 @@ async function submitCreate() {
         </section>
       </div>
     </Teleport>
+
+    <AddIngredientModal v-model="showAddIngredientModal" @created="onIngredientCreated" />
   </div>
 </template>

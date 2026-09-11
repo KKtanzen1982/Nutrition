@@ -4,6 +4,8 @@ from typing import List, Optional, Dict
 
 from recipes.models import IngredientLibrary, IngredientStock, Recipe, RecipeIngredient, RecipeStep, RecipeNutrition
 
+COST_LEVEL_RANK = {"低": 1, "中": 2, "高": 3}  # 食譜成本等級＝食材裡等級最高的那個（見 RecipeService.calculate_nutrition）
+
 
 def _recipe_to_summary(r: Recipe) -> Dict:
     """瀏覽/搜尋清單用的輕量版本：不含食材/步驟，避免每筆都觸發額外查詢（原本 list/search 會對每筆食譜
@@ -12,7 +14,7 @@ def _recipe_to_summary(r: Recipe) -> Dict:
     n = r.nutrition
     return {
         "id": r.id, "recipe_name": r.recipe_name, "category": r.category,
-        "base_weight_g": r.base_weight_g, "cost_level": r.cost_level,
+        "base_weight_g": r.base_weight_g, "cost_level": r.cost_level, "cost_level_manual": r.cost_level_manual,
         "is_active": r.is_active, "is_vegetarian": r.is_vegetarian, "carb_source": r.carb_source,
         "pairing_style": r.pairing_style,
         "total_calories_kcal": n.total_calories_kcal if n else None,
@@ -47,6 +49,7 @@ class IngredientService:
         update_data = data.model_dump(exclude_unset=True)
         nutrition_fields = {"calories_per_100g", "protein_per_100g", "carbs_per_100g", "fat_per_100g", "fiber_per_100g"}
         nutrition_changed = bool(nutrition_fields & set(update_data.keys()))
+        cost_level_changed = "cost_level" in update_data
         needs_tracking = update_data.pop("needs_stock_tracking", None)
         for k, v in update_data.items():
             setattr(ingredient, k, v)
@@ -59,7 +62,7 @@ class IngredientService:
                 db.delete(existing_stock)
         db.commit()
         db.refresh(ingredient)
-        if nutrition_changed:
+        if nutrition_changed or cost_level_changed:
             recipe_service.recalculate_recipes_using_ingredient(db, ingredient_id)
         return ingredient
 
@@ -118,6 +121,7 @@ class RecipeService:
         if not recipe:
             return None
         totals = {"total_calories_kcal": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0, "fiber_g": 0.0}
+        ingredient_cost_levels = []
         for ri in recipe.ingredients:
             ing = db.get(IngredientLibrary, ri.ingredient_id)
             if not ing:
@@ -128,6 +132,8 @@ class RecipeService:
             totals["carbs_g"] += (ing.carbs_per_100g or 0) * ratio
             totals["fat_g"] += (ing.fat_per_100g or 0) * ratio
             totals["fiber_g"] += (ing.fiber_per_100g or 0) * ratio
+            if ing.cost_level:
+                ingredient_cost_levels.append(ing.cost_level)
         totals = {k: round(v, 2) for k, v in totals.items()}
 
         nutrition = db.query(RecipeNutrition).filter(RecipeNutrition.recipe_id == recipe_id).first()
@@ -137,6 +143,12 @@ class RecipeService:
         else:
             nutrition = RecipeNutrition(recipe_id=recipe_id, **totals)
             db.add(nutrition)
+
+        # 成本等級＝食材裡最高的那個，除非使用者手動覆蓋過（cost_level_manual）；食材都沒標成本
+        # 等級的話（ingredient_cost_levels 是空的）就保留原值，不要把 NOT NULL 欄位清成空的
+        if not recipe.cost_level_manual and ingredient_cost_levels:
+            recipe.cost_level = max(ingredient_cost_levels, key=lambda level: COST_LEVEL_RANK.get(level, 0))
+
         db.commit()
         return totals
 
@@ -156,6 +168,10 @@ class RecipeService:
         payload = data.model_dump()
         ingredients = payload.pop("ingredients")
         steps = payload.pop("steps")
+        # cost_level 沒填就先塞個佔位值（下面 calculate_nutrition 會馬上依食材重算掉，
+        # Recipe.cost_level 是 NOT NULL 欄位不能先留空）；有填則視為手動指定
+        cost_level_manual = payload.get("cost_level") is not None
+        payload["cost_level"] = payload.get("cost_level") or "低"
 
         existing = db.query(Recipe).filter(Recipe.recipe_name == payload["recipe_name"]).first()
         if existing and existing.is_active:
@@ -165,13 +181,14 @@ class RecipeService:
             recipe = existing
             for k, v in payload.items():
                 setattr(recipe, k, v)
+            recipe.cost_level_manual = cost_level_manual
             recipe.is_active = True
             recipe.last_updated_at = datetime.utcnow()
             db.query(RecipeIngredient).filter(RecipeIngredient.recipe_id == recipe.id).delete()
             db.query(RecipeStep).filter(RecipeStep.recipe_id == recipe.id).delete()
             db.flush()
         else:
-            recipe = Recipe(**payload)
+            recipe = Recipe(**payload, cost_level_manual=cost_level_manual)
             db.add(recipe)
             db.flush()
 
@@ -191,7 +208,12 @@ class RecipeService:
         recipe = db.get(Recipe, recipe_id)
         if not recipe:
             return None
-        for k, v in data.model_dump(exclude_unset=True).items():
+        update_data = data.model_dump(exclude_unset=True)
+        # 這次更新有明確帶 cost_level，代表使用者手動指定了成本等級——設 cost_level_manual，
+        # 之後食材異動（calculate_nutrition）就不會再自動覆蓋掉這個值
+        if "cost_level" in update_data:
+            recipe.cost_level_manual = True
+        for k, v in update_data.items():
             setattr(recipe, k, v)
         recipe.last_updated_at = datetime.utcnow()
         db.commit()

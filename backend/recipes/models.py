@@ -21,6 +21,7 @@ class IngredientLibrary(Base):
     fiber_per_100g = Column(Float, nullable=True)
     preferred_purchase_location = Column(String(255), nullable=True)
     needs_stock_tracking = Column(Boolean, default=False)
+    cost_level = Column(String(20), nullable=True)  # 低/中/高，食譜的成本等級改由這裡往上算（見 recipes/services.py calculate_nutrition）
     # 盛產季節（春/夏/秋/冬，逗號分隔可跨季），只有蔬菜水果這類有明顯產季的才會填；
     # null/空字串＝不分季節（穀物、肉類、調味料、乳製品等常年都能買），選餐時不受季節限制
     season = Column(String(20), nullable=True)
@@ -49,6 +50,9 @@ class Recipe(Base):
     category = Column(String(50), nullable=False)
     base_weight_g = Column(Integer, nullable=False)
     cost_level = Column(String(20), nullable=False)
+    # 預設由食材的 cost_level 自動算（取食材中最高等級），使用者透過 update_recipe 明確指定過 cost_level
+    # 之後這裡會是 True，後續食材異動就不會再覆蓋掉使用者手動設定的值（見 calculate_nutrition）
+    cost_level_manual = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     is_vegetarian = Column(Boolean, default=False)
     allergen_tags = Column(String(255), default="")
