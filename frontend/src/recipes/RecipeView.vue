@@ -18,8 +18,14 @@ import type { IngredientSearchResult, RecipeDetail, RecipeListEntry, RecipeSearc
 
 const { confirmDialog } = useConfirmDialog()
 
-const RECIPE_CATEGORIES = ['早餐', '主食', '肉', '菜', '飲料', '點心']
+// 要跟後端實際在用的分類一致（見 backend/meal_plans/selection_algorithm.py 的 CATEGORY_VARIETY_CAP/
+// LUNCH_DINNER_CATEGORIES_WITH_SOUP），「飲料」「點心」不是後端選餐演算法認得的分類，之前是打錯，
+// 用這個表單建立的湯/下午茶食譜之前其實建不出來
+const RECIPE_CATEGORIES = ['早餐', '主食', '肉', '菜', '湯', '下午茶']
 const COST_LEVELS = ['低', '中', '高']
+// 只有主食/肉/菜/湯這幾類會參與選餐演算法的搭配判斷（主食決定風格，其他類別要跟著配，見後端 selection_algorithm.py）
+const PAIRING_STYLES = ['家常', '西式']
+const PAIRING_STYLE_CATEGORIES = new Set(['主食', '肉', '菜', '湯'])
 
 interface IngredientRow {
   ingredient_id: number
@@ -223,7 +229,7 @@ async function submitAddStepVersion() {
 }
 
 const editingBasic = ref(false)
-const basicForm = reactive({ recipe_name: '', category: '', base_weight_g: 0, cost_level: '' })
+const basicForm = reactive({ recipe_name: '', category: '', base_weight_g: 0, cost_level: '', pairing_style: '' })
 const savingBasic = ref(false)
 
 function startEditBasic() {
@@ -233,6 +239,7 @@ function startEditBasic() {
     category: detail.value.category,
     base_weight_g: detail.value.base_weight_g,
     cost_level: detail.value.cost_level,
+    pairing_style: detail.value.pairing_style ?? '',
   })
   editingBasic.value = true
 }
@@ -242,7 +249,10 @@ async function submitEditBasic() {
   savingBasic.value = true
   detailError.value = null
   try {
-    detail.value = await updateRecipe(detail.value.id, { ...basicForm })
+    detail.value = await updateRecipe(detail.value.id, {
+      ...basicForm,
+      pairing_style: PAIRING_STYLE_CATEGORIES.has(basicForm.category) ? basicForm.pairing_style || null : null,
+    })
     editingBasic.value = false
     reload()
   } catch (e) {
@@ -349,6 +359,7 @@ const createForm = reactive({
   category: RECIPE_CATEGORIES[0],
   base_weight_g: null as number | null,
   cost_level: COST_LEVELS[0],
+  pairing_style: '',
 })
 const ingredientRows = ref<IngredientRow[]>([])
 const stepRows = ref<string[]>([''])
@@ -403,6 +414,7 @@ async function submitCreate() {
       category: createForm.category,
       base_weight_g: createForm.base_weight_g,
       cost_level: createForm.cost_level,
+      pairing_style: PAIRING_STYLE_CATEGORIES.has(createForm.category) ? createForm.pairing_style || null : null,
       ingredients: ingredientRows.value.map((r) => ({
         ingredient_id: r.ingredient_id,
         quantity_g: r.quantity_g as number,
@@ -414,6 +426,7 @@ async function submitCreate() {
     })
     createForm.recipe_name = ''
     createForm.base_weight_g = null
+    createForm.pairing_style = ''
     ingredientRows.value = []
     stepRows.value = ['']
     showCreate.value = false
@@ -453,6 +466,14 @@ async function submitCreate() {
         </select>
         <select v-model="createForm.cost_level" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink">
           <option v-for="c in COST_LEVELS" :key="c" :value="c">{{ c }}</option>
+        </select>
+        <select
+          v-if="PAIRING_STYLE_CATEGORIES.has(createForm.category)"
+          v-model="createForm.pairing_style"
+          class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink"
+        >
+          <option value="">搭配風格（不指定）</option>
+          <option v-for="s in PAIRING_STYLES" :key="s" :value="s">{{ s }}</option>
         </select>
         <input v-model.number="createForm.base_weight_g" type="number" placeholder="基礎重量 (g)" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink sm:col-span-4" />
       </div>
@@ -605,7 +626,10 @@ async function submitCreate() {
 
       <template v-if="detail">
         <div v-if="!editingBasic" class="mt-3 flex items-center justify-between">
-          <p class="text-xs text-tea">{{ detail.category }} · {{ detail.cost_level }} · 基礎 {{ detail.base_weight_g }}g</p>
+          <p class="text-xs text-tea">
+            {{ detail.category }} · {{ detail.cost_level }} · 基礎 {{ detail.base_weight_g }}g
+            <template v-if="detail.pairing_style"> · {{ detail.pairing_style }}</template>
+          </p>
           <button type="button" class="text-xs font-semibold text-accent hover:text-accent-bright" @click="startEditBasic">編輯基本資料</button>
         </div>
         <div v-else class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -617,6 +641,14 @@ async function submitCreate() {
             <option v-for="c in COST_LEVELS" :key="c" :value="c">{{ c }}</option>
           </select>
           <input v-model.number="basicForm.base_weight_g" type="number" class="rounded border border-ink/15 bg-bg px-2 py-1 text-sm text-ink" />
+          <select
+            v-if="PAIRING_STYLE_CATEGORIES.has(basicForm.category)"
+            v-model="basicForm.pairing_style"
+            class="rounded border border-ink/15 bg-bg px-2 py-1 text-sm text-ink"
+          >
+            <option value="">搭配風格（不指定）</option>
+            <option v-for="s in PAIRING_STYLES" :key="s" :value="s">{{ s }}</option>
+          </select>
           <button type="button" class="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-on-accent" :disabled="savingBasic" @click="submitEditBasic">
             {{ savingBasic ? '儲存中…' : '儲存' }}
           </button>

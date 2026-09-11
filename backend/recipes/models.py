@@ -53,6 +53,9 @@ class Recipe(Base):
     is_vegetarian = Column(Boolean, default=False)
     allergen_tags = Column(String(255), default="")
     carb_source = Column(String(20), nullable=True)  # 主食類的碳水來源（飯/麵/其他），供候選1主食輪替規則使用
+    # 主食/肉/菜/湯的搭配風格（家常/西式），供選餐演算法判斷這道菜跟當餐主食搭不搭（見 selection_algorithm.py）；
+    # 早餐/下午茶不涉及跨類別搭配，留 null
+    pairing_style = Column(String(20), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

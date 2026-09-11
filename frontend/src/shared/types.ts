@@ -636,6 +636,7 @@ export interface RecipeDetail {
   base_weight_g: number
   cost_level: string
   is_active: boolean
+  pairing_style: string | null
   created_at: string
   last_updated_at: string
   ingredients: RecipeIngredientEntry[]
@@ -652,6 +653,7 @@ export interface RecipeListEntry {
   is_active: boolean
   is_vegetarian: boolean
   carb_source: string | null
+  pairing_style: string | null
   total_calories_kcal: number | null
   protein_g: number | null
   carbs_g: number | null
@@ -675,6 +677,7 @@ export interface CreateRecipePayload {
   category: string
   base_weight_g: number
   cost_level: string
+  pairing_style?: string | null
   ingredients: CreateRecipeIngredientPayload[]
   steps: CreateRecipeStepPayload[]
 }
@@ -685,6 +688,7 @@ export interface UpdateRecipePayload {
   base_weight_g?: number
   cost_level?: string
   is_active?: boolean
+  pairing_style?: string | null
 }
 
 export interface PurchaseLocation {

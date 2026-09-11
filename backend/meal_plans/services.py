@@ -61,7 +61,7 @@ def _recipe_to_candidate(recipe: Recipe) -> Dict:
     return {
         "id": recipe.id, "recipe_name": recipe.recipe_name, "category": recipe.category,
         "base_weight_g": recipe.base_weight_g, "cost_level": recipe.cost_level,
-        "carb_source": recipe.carb_source,
+        "carb_source": recipe.carb_source, "pairing_style": recipe.pairing_style,
         "calories": recipe.nutrition.total_calories_kcal if recipe.nutrition else 0,
         "protein_g": recipe.nutrition.protein_g if recipe.nutrition else 0,
         "carbs_g": recipe.nutrition.carbs_g if recipe.nutrition else 0,

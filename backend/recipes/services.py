@@ -14,6 +14,7 @@ def _recipe_to_summary(r: Recipe) -> Dict:
         "id": r.id, "recipe_name": r.recipe_name, "category": r.category,
         "base_weight_g": r.base_weight_g, "cost_level": r.cost_level,
         "is_active": r.is_active, "is_vegetarian": r.is_vegetarian, "carb_source": r.carb_source,
+        "pairing_style": r.pairing_style,
         "total_calories_kcal": n.total_calories_kcal if n else None,
         "protein_g": n.protein_g if n else None,
         "carbs_g": n.carbs_g if n else None,

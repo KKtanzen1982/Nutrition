@@ -81,12 +81,14 @@ def select_recipe_for_slot(candidates: List[Dict], category: str, target_calorie
                             secondary_target: Optional[Tuple[float, float]] = None,
                             require_carb_source: Optional[str] = None,
                             exclude_carb_source: Optional[str] = None,
-                            require_recipe_name_in: Optional[Set[str]] = None) -> Optional[Dict]:
+                            require_recipe_name_in: Optional[Set[str]] = None,
+                            require_pairing_style: Optional[str] = None) -> Optional[Dict]:
     """secondary_target: (calories, protein_g)，共食類餐點（午餐/晚餐）兩人熱量目標常常差很多，
     只用平均值選菜會讓熱量需求較低那方的份量在後續各自縮放時撞到 SERVING_SCALE_MIN 下限、實際熱量超出他自己的目標。
     傳入的話評分改採「兩人之中縮放後偏差較大者」（worst-case），挑對兩人都合理的食譜，而不是只顧平均值。
     require_carb_source/exclude_carb_source/require_recipe_name_in：主食白飯規則用，
-    篩不到就退回原候選池（安全防呆，避免因為食譜庫選項不夠而選不到菜）。"""
+    require_pairing_style：跟當餐主食搭配用（見 build_day_meals），三者都篩不到就退回原候選池
+    （安全防呆，避免因為食譜庫選項不夠而選不到菜）；pairing_style 沒標的食譜（None）視為百搭，不會被篩掉。"""
     pool = [r for r in candidates if r["category"] == category]
     if not pool:
         return None
@@ -103,6 +105,10 @@ def select_recipe_for_slot(candidates: List[Dict], category: str, target_calorie
             pool = filtered
     if exclude_carb_source is not None:
         filtered = [r for r in pool if r.get("carb_source") != exclude_carb_source]
+        if filtered:
+            pool = filtered
+    if require_pairing_style is not None:
+        filtered = [r for r in pool if r.get("pairing_style") in (None, require_pairing_style)]
         if filtered:
             pool = filtered
 
@@ -212,6 +218,8 @@ def build_day_meals(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dict, 
         if (meal_type, "A") in fixed_meals or (meal_type, "B") in fixed_meals:
             continue
         share = MEAL_SHARES[meal_type]
+        staple_pairing_style = None  # 這餐主食的搭配風格（家常/西式），主食類（categories 第一項）選出後才會有值,
+        # 用來限制肉/菜/湯只從跟主食搭的風格裡選（見 select_recipe_for_slot 的 require_pairing_style）
         for category, cat_share in categories:
             a_slot_cal = user_a_ctx["daily_calories_target"] * share * cat_share
             a_slot_protein = user_a_ctx["daily_protein_g"] * share * cat_share
@@ -243,9 +251,12 @@ def build_day_meals(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dict, 
                                                  secondary_target=(b_slot_cal, b_slot_protein),
                                                  require_carb_source=require_carb_source,
                                                  exclude_carb_source=exclude_carb_source,
-                                                 require_recipe_name_in=require_recipe_name_in)
+                                                 require_recipe_name_in=require_recipe_name_in,
+                                                 require_pairing_style=None if category == "主食" else staple_pairing_style)
             if not recipe:
                 continue
+            if category == "主食":
+                staple_pairing_style = recipe.get("pairing_style")
             today_recipe_ids.add(recipe["id"])
             if category == "主食" and recipe.get("carb_source"):
                 today_carb_sources.add(recipe["carb_source"])
