@@ -612,7 +612,7 @@ async function submitCreate() {
     <p v-if="loading" class="mt-4 text-sm text-tea">載入中…</p>
     <p v-if="error" class="mt-4 rounded-lg bg-alert/10 px-3 py-2 text-sm text-alert">{{ error }}</p>
 
-    <div v-if="selectedIds.size > 0" class="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-accent bg-surface px-3 py-2">
+    <div v-if="selectedIds.size > 0" class="sticky top-0 z-10 mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-accent bg-surface px-3 py-2 shadow-sm">
       <span class="text-xs font-semibold text-ink">已選 {{ selectedIds.size }} 道食譜</span>
       <button
         type="button"

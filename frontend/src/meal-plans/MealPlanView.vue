@@ -1475,7 +1475,7 @@ function toggleDiffExpanded(date: string) {
                 可以自由新增/移除這一餐的食譜，或勾選多道菜一起處理。組成改變後份量會先概略分配，按「重算份量」依熱量目標重新精算整天的份量。
               </p>
 
-              <div v-if="mealEditorSelected.size > 0" class="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-accent bg-surface px-3 py-2">
+              <div v-if="mealEditorSelected.size > 0" class="sticky top-0 z-10 mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-accent bg-surface px-3 py-2 shadow-sm">
                 <span class="text-xs font-semibold text-ink">已選 {{ mealEditorSelected.size }} 項</span>
                 <button type="button" class="text-xs font-semibold text-accent hover:text-accent-bright" :disabled="mealEditorBusy" @click="startBulkReplace">
                   一起換成…
