@@ -699,7 +699,10 @@ async function submitCreate() {
           <select v-model="basicForm.category" class="rounded border border-ink/15 bg-bg px-2 py-1 text-sm text-ink">
             <option v-for="c in RECIPE_CATEGORIES" :key="c" :value="c">{{ c }}</option>
           </select>
-          <input v-model.number="basicForm.base_weight_g" type="number" class="rounded border border-ink/15 bg-bg px-2 py-1 text-sm text-ink" />
+          <label class="text-xs text-tea">
+            基礎重量 (g)
+            <input v-model.number="basicForm.base_weight_g" type="number" class="mt-1 w-full rounded border border-ink/15 bg-bg px-2 py-1 text-sm text-ink" />
+          </label>
           <select
             v-if="PAIRING_STYLE_CATEGORIES.has(basicForm.category)"
             v-model="basicForm.pairing_style"

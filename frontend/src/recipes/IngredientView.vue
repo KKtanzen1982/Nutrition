@@ -330,20 +330,44 @@ async function submitCreate() {
         <h2 class="border-b-[1.5px] border-accent pb-1 text-[11.5px] font-semibold uppercase tracking-wide text-muted">新增食材</h2>
       </div>
       <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <input v-model="createForm.ingredient_name" type="text" placeholder="食材名稱" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink sm:col-span-2" />
-        <select v-model="createForm.category" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink">
-          <option v-for="c in CATEGORIES" :key="c" :value="c">{{ c }}</option>
-        </select>
-        <select v-model="createForm.cost_level" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink">
-          <option value="">成本等級（未設定）</option>
-          <option v-for="c in COST_LEVELS" :key="c" :value="c">{{ c }}</option>
-        </select>
-        <input v-model.number="createForm.calories_per_100g" type="number" placeholder="熱量 /100g" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
-        <input v-model.number="createForm.protein_per_100g" type="number" placeholder="蛋白質 /100g" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
-        <input v-model.number="createForm.carbs_per_100g" type="number" placeholder="碳水 /100g" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
-        <input v-model.number="createForm.fat_per_100g" type="number" placeholder="脂肪 /100g" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
-        <input v-model.number="createForm.fiber_per_100g" type="number" placeholder="纖維 /100g" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
-        <label class="flex items-center gap-2 text-sm text-tea">
+        <label class="text-xs text-tea sm:col-span-2">
+          食材名稱
+          <input v-model="createForm.ingredient_name" type="text" class="mt-1 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
+        </label>
+        <label class="text-xs text-tea">
+          分類
+          <select v-model="createForm.category" class="mt-1 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink">
+            <option v-for="c in CATEGORIES" :key="c" :value="c">{{ c }}</option>
+          </select>
+        </label>
+        <label class="text-xs text-tea">
+          成本等級
+          <select v-model="createForm.cost_level" class="mt-1 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink">
+            <option value="">未設定</option>
+            <option v-for="c in COST_LEVELS" :key="c" :value="c">{{ c }}</option>
+          </select>
+        </label>
+        <label class="text-xs text-tea">
+          熱量 /100g
+          <input v-model.number="createForm.calories_per_100g" type="number" class="mt-1 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
+        </label>
+        <label class="text-xs text-tea">
+          蛋白質 /100g
+          <input v-model.number="createForm.protein_per_100g" type="number" class="mt-1 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
+        </label>
+        <label class="text-xs text-tea">
+          碳水 /100g
+          <input v-model.number="createForm.carbs_per_100g" type="number" class="mt-1 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
+        </label>
+        <label class="text-xs text-tea">
+          脂肪 /100g
+          <input v-model.number="createForm.fat_per_100g" type="number" class="mt-1 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
+        </label>
+        <label class="text-xs text-tea">
+          纖維 /100g
+          <input v-model.number="createForm.fiber_per_100g" type="number" class="mt-1 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
+        </label>
+        <label class="flex items-center gap-2 self-end text-sm text-tea">
           <input v-model="createForm.needs_stock_tracking" type="checkbox" class="accent-accent" />
           追蹤庫存
         </label>
@@ -423,20 +447,44 @@ async function submitCreate() {
           </div>
 
           <div v-if="editingId === item.id" class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <input v-model="editForm.ingredient_name" type="text" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink sm:col-span-2" />
-            <select v-model="editForm.category" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink">
-              <option v-for="c in CATEGORIES" :key="c" :value="c">{{ c }}</option>
-            </select>
-            <select v-model="editForm.cost_level" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink">
-              <option value="">成本等級（未設定）</option>
-              <option v-for="c in COST_LEVELS" :key="c" :value="c">{{ c }}</option>
-            </select>
-            <input v-model.number="editForm.calories_per_100g" type="number" placeholder="熱量 /100g" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
-            <input v-model.number="editForm.protein_per_100g" type="number" placeholder="蛋白質 /100g" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
-            <input v-model.number="editForm.carbs_per_100g" type="number" placeholder="碳水 /100g" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
-            <input v-model.number="editForm.fat_per_100g" type="number" placeholder="脂肪 /100g" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
-            <input v-model.number="editForm.fiber_per_100g" type="number" placeholder="纖維 /100g" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
-            <label class="flex items-center gap-2 text-sm text-tea">
+            <label class="text-xs text-tea sm:col-span-2">
+              食材名稱
+              <input v-model="editForm.ingredient_name" type="text" class="mt-1 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
+            </label>
+            <label class="text-xs text-tea">
+              分類
+              <select v-model="editForm.category" class="mt-1 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink">
+                <option v-for="c in CATEGORIES" :key="c" :value="c">{{ c }}</option>
+              </select>
+            </label>
+            <label class="text-xs text-tea">
+              成本等級
+              <select v-model="editForm.cost_level" class="mt-1 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink">
+                <option value="">未設定</option>
+                <option v-for="c in COST_LEVELS" :key="c" :value="c">{{ c }}</option>
+              </select>
+            </label>
+            <label class="text-xs text-tea">
+              熱量 /100g
+              <input v-model.number="editForm.calories_per_100g" type="number" class="mt-1 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
+            </label>
+            <label class="text-xs text-tea">
+              蛋白質 /100g
+              <input v-model.number="editForm.protein_per_100g" type="number" class="mt-1 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
+            </label>
+            <label class="text-xs text-tea">
+              碳水 /100g
+              <input v-model.number="editForm.carbs_per_100g" type="number" class="mt-1 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
+            </label>
+            <label class="text-xs text-tea">
+              脂肪 /100g
+              <input v-model.number="editForm.fat_per_100g" type="number" class="mt-1 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
+            </label>
+            <label class="text-xs text-tea">
+              纖維 /100g
+              <input v-model.number="editForm.fiber_per_100g" type="number" class="mt-1 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
+            </label>
+            <label class="flex items-center gap-2 self-end text-sm text-tea">
               <input v-model="editForm.needs_stock_tracking" type="checkbox" class="accent-accent" />
               追蹤庫存
             </label>
@@ -456,8 +504,14 @@ async function submitCreate() {
               </div>
             </div>
             <template v-if="editForm.needs_stock_tracking">
-              <input v-model.number="editForm.current_quantity_g" type="number" placeholder="目前庫存量" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
-              <input v-model.number="editForm.min_threshold_g" type="number" placeholder="補貨警告閾值" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
+              <label class="text-xs text-tea">
+                目前庫存量
+                <input v-model.number="editForm.current_quantity_g" type="number" class="mt-1 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
+              </label>
+              <label class="text-xs text-tea">
+                補貨警告閾值
+                <input v-model.number="editForm.min_threshold_g" type="number" class="mt-1 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
+              </label>
             </template>
             <button
               type="button"
