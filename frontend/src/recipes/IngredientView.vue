@@ -13,7 +13,10 @@ import {
   setIngredientLocationPreferences,
 } from '../shopping/ingredient_location_preference_api'
 import { listPurchaseLocations } from '../shopping/purchase_location_api'
+import { useConfirmDialog } from '../shared/useConfirmDialog'
 import type { Ingredient, IngredientSearchResult, LowStockIngredient, PurchaseLocation } from '../shared/types'
+
+const { confirmDialog } = useConfirmDialog()
 
 const CATEGORIES = ['蔬菜', '肉類', '穀物', '乳製品', '調味料', '其他']
 const SEASONS = ['春', '夏', '秋', '冬']
@@ -74,7 +77,10 @@ function reload() {
   }
 }
 
-watch([categoryFilter, page], reload)
+watch([categoryFilter, page], () => {
+  clearSelection()
+  reload()
+})
 reload()
 
 async function loadLowStock() {
@@ -95,6 +101,46 @@ async function loadPurchaseLocations() {
   }
 }
 loadPurchaseLocations()
+
+// ---- 批次設定採購地點：勾選清單裡多個食材，一次套用同一個採購地點，取代原本要逐一點「編輯」
+// 才能設定的流程。會整組覆蓋掉被選到的食材原本的地點偏好（跟 set_ingredient_preferences 全刪全插
+// 的邏輯一致，這裡只會設優先順序 1 這一筆）----
+const selectedIds = ref<Set<number>>(new Set())
+const bulkLocationId = ref<number | null>(null)
+const applyingBulkLocation = ref(false)
+
+function toggleSelected(id: number) {
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedIds.value = next
+}
+function clearSelection() {
+  selectedIds.value = new Set()
+}
+
+async function applyBulkLocation() {
+  if (selectedIds.value.size === 0 || bulkLocationId.value === null) return
+  const locationId = bulkLocationId.value
+  const locationName = purchaseLocations.value.find((l) => l.id === locationId)?.location_name ?? ''
+  const ok = await confirmDialog(
+    `把選取的 ${selectedIds.value.size} 項食材的採購地點都設成「${locationName}」？會取代這些食材原本設定的採購地點偏好。`,
+  )
+  if (!ok) return
+  applyingBulkLocation.value = true
+  error.value = null
+  try {
+    for (const id of selectedIds.value) {
+      await setIngredientLocationPreferences(id, { preferences: [{ preferred_location_id: locationId, priority: 1 }] })
+    }
+    clearSelection()
+    bulkLocationId.value = null
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '批次設定失敗，請稍後再試'
+  } finally {
+    applyingBulkLocation.value = false
+  }
+}
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit)))
 
@@ -416,6 +462,23 @@ async function submitCreate() {
     <p v-if="error" class="mt-4 rounded-lg bg-alert/10 px-3 py-2 text-sm text-alert">{{ error }}</p>
     <p v-if="editError" class="mt-4 rounded-lg bg-alert/10 px-3 py-2 text-sm text-alert">{{ editError }}</p>
 
+    <div v-if="selectedIds.size > 0" class="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-accent bg-surface px-3 py-2">
+      <span class="text-xs font-semibold text-ink">已選 {{ selectedIds.size }} 項食材</span>
+      <select v-model.number="bulkLocationId" class="rounded-lg border border-ink/15 bg-bg px-2 py-1 text-xs text-ink">
+        <option :value="null">選擇採購地點</option>
+        <option v-for="loc in purchaseLocations" :key="loc.id" :value="loc.id">{{ loc.location_name }}</option>
+      </select>
+      <button
+        type="button"
+        class="text-xs font-semibold text-accent hover:text-accent-bright disabled:opacity-50"
+        :disabled="bulkLocationId === null || applyingBulkLocation"
+        @click="applyBulkLocation"
+      >
+        {{ applyingBulkLocation ? '套用中…' : '套用' }}
+      </button>
+      <button type="button" class="ml-auto text-xs text-tea hover:text-ink" @click="clearSelection">取消選取</button>
+    </div>
+
     <ul v-if="searchResults && !loading" class="mt-4 divide-y divide-ink/10 rounded-2xl border border-ink/10 bg-surface">
       <li v-for="item in searchResults" :key="item.id" class="p-4">
         <p class="text-sm text-ink">{{ item.ingredient_name }}</p>
@@ -428,14 +491,22 @@ async function submitCreate() {
       <ul class="mt-4 divide-y divide-ink/10 rounded-2xl border border-ink/10 bg-surface">
         <li v-for="item in items" :key="item.id" class="p-4">
           <div class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-sm text-ink">{{ item.ingredient_name }}</p>
-              <p class="text-xs text-tea">
-                {{ item.category }} · {{ item.calories_per_100g ?? '—' }} kcal/100g
-                <span v-if="item.cost_level"> · 成本{{ item.cost_level }}</span>
-                <span v-if="item.season">· {{ item.season }}盛產</span>
-                <span v-if="item.needs_stock_tracking && item.stock"> · 庫存 {{ item.stock.current_quantity_g }}{{ item.stock.unit }}</span>
-              </p>
+            <div class="flex min-w-0 items-center gap-3">
+              <input
+                type="checkbox"
+                class="shrink-0 accent-accent"
+                :checked="selectedIds.has(item.id)"
+                @change="toggleSelected(item.id)"
+              />
+              <div class="min-w-0">
+                <p class="text-sm text-ink">{{ item.ingredient_name }}</p>
+                <p class="text-xs text-tea">
+                  {{ item.category }} · {{ item.calories_per_100g ?? '—' }} kcal/100g
+                  <span v-if="item.cost_level"> · 成本{{ item.cost_level }}</span>
+                  <span v-if="item.season">· {{ item.season }}盛產</span>
+                  <span v-if="item.needs_stock_tracking && item.stock"> · 庫存 {{ item.stock.current_quantity_g }}{{ item.stock.unit }}</span>
+                </p>
+              </div>
             </div>
             <button
               type="button"
