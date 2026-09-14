@@ -48,7 +48,13 @@ def deserialize_row(table, row: dict) -> dict:
 
 
 def sync_sequences(conn: Connection, metadata: MetaData) -> None:
-    """插入完帶著原始 id 的資料後，把每張表的 auto-increment 序列調到目前最大 id，避免之後新增資料撞主鍵。"""
+    """插入完帶著原始 id 的資料後，把每張表的 auto-increment 序列調到目前最大 id，避免之後新增資料撞主鍵。
+
+    只有 Postgres 有序列可調；SQLite（例如本機 mock 資料庫）插入帶明確 id 的資料後，
+    下一筆自動遞增本來就會接著目前最大 id，不需要（也做不到）額外同步。
+    """
+    if conn.dialect.name != "postgresql":
+        return
     for table in metadata.sorted_tables:
         for col in table.primary_key.columns:
             if col.type.python_type is not int:
