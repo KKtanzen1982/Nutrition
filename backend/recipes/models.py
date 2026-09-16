@@ -25,6 +25,9 @@ class IngredientLibrary(Base):
     # 盛產季節（春/夏/秋/冬，逗號分隔可跨季），只有蔬菜水果這類有明顯產季的才會填；
     # null/空字串＝不分季節（穀物、肉類、調味料、乳製品等常年都能買），選餐時不受季節限制
     season = Column(String(20), nullable=True)
+    # 排除推薦：勾選後任何用到這個食材的食譜都不會出現在週推薦候選裡（見 meal_plans/services.py
+    # _candidate_recipes），跟 ExcludedRecipe 黑名單類似但是以食材為單位，不用逐一把每道食譜都加黑名單
+    exclude_from_recommendations = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     stock = relationship("IngredientStock", uselist=False, cascade="all, delete-orphan")

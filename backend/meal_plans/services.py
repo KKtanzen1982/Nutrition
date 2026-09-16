@@ -57,6 +57,18 @@ def _out_of_season_recipe_ids(db: Session, target_date: date) -> Set[int]:
     return out_of_season
 
 
+def _excluded_ingredient_recipe_ids(db: Session) -> Set[int]:
+    """食材庫裡標記「排除推薦」的食材（IngredientLibrary.exclude_from_recommendations），
+    用到這些食材的食譜整批排除，不用逐一把每道食譜加進 ExcludedRecipe 黑名單。"""
+    rows = (
+        db.query(RecipeIngredient.recipe_id)
+        .join(IngredientLibrary, RecipeIngredient.ingredient_id == IngredientLibrary.id)
+        .filter(IngredientLibrary.exclude_from_recommendations == True)  # noqa: E712
+        .all()
+    )
+    return {recipe_id for (recipe_id,) in rows}
+
+
 def _recipe_to_candidate(recipe: Recipe) -> Dict:
     return {
         "id": recipe.id, "recipe_name": recipe.recipe_name, "category": recipe.category,
@@ -148,23 +160,35 @@ favorite_recipe_service = FavoriteRecipeService()
 
 
 class SoupDayPreferenceService:
-    """勾選「這天想喝湯」，兩人共用一份設定，不分誰勾的"""
+    """勾選「這天這一餐想喝湯」，兩人共用一份設定，不分誰勾的。午餐/晚餐各自獨立設定
+    （同一天要兩餐都喝湯，兩邊都勾就好）。"""
 
-    def list_days(self, db: Session) -> List[int]:
-        return sorted(r.day_of_week for r in db.query(SoupDayPreference).all())
+    def list_days(self, db: Session) -> Dict[str, List[int]]:
+        rows = db.query(SoupDayPreference).all()
+        return {
+            "lunch_days": sorted(r.day_of_week for r in rows if r.meal_type == "lunch"),
+            "dinner_days": sorted(r.day_of_week for r in rows if r.meal_type == "dinner"),
+        }
 
-    def set_days(self, db: Session, days: List[int]) -> List[int]:
-        invalid = [d for d in days if d < 0 or d > 6]
-        if invalid:
-            raise ValueError("day_of_week 必須介於 0-6（0=週一...6=週日）")
+    def set_days(self, db: Session, lunch_days: List[int], dinner_days: List[int]) -> Dict[str, List[int]]:
+        for days in (lunch_days, dinner_days):
+            invalid = [d for d in days if d < 0 or d > 6]
+            if invalid:
+                raise ValueError("day_of_week 必須介於 0-6（0=週一...6=週日）")
         db.query(SoupDayPreference).delete()
-        for d in sorted(set(days)):
-            db.add(SoupDayPreference(day_of_week=d))
+        for d in sorted(set(lunch_days)):
+            db.add(SoupDayPreference(day_of_week=d, meal_type="lunch"))
+        for d in sorted(set(dinner_days)):
+            db.add(SoupDayPreference(day_of_week=d, meal_type="dinner"))
         db.commit()
         return self.list_days(db)
 
-    def soup_days(self, db: Session) -> Set[int]:
-        return {r.day_of_week for r in db.query(SoupDayPreference).all()}
+    def soup_days_by_meal(self, db: Session) -> Dict[str, Set[int]]:
+        rows = db.query(SoupDayPreference).all()
+        return {
+            "lunch": {r.day_of_week for r in rows if r.meal_type == "lunch"},
+            "dinner": {r.day_of_week for r in rows if r.meal_type == "dinner"},
+        }
 
 
 soup_day_preference_service = SoupDayPreferenceService()
@@ -376,11 +400,12 @@ class MealPlanService:
         needs_veg = "素食" in _parse_csv(pref_a["restrictions"]) or "素食" in _parse_csv(pref_b["restrictions"])
         excluded_ids = excluded_recipe_service.excluded_recipe_ids(db)
         out_of_season_ids = _out_of_season_recipe_ids(db, target_date or date.today())
+        excluded_ingredient_ids = _excluded_ingredient_recipe_ids(db)
 
         recipes = db.query(Recipe).filter(Recipe.is_active == True).all()
         candidates = []
         for r in recipes:
-            if r.id in excluded_ids or r.id in out_of_season_ids:
+            if r.id in excluded_ids or r.id in out_of_season_ids or r.id in excluded_ingredient_ids:
                 continue
             tags = set(_parse_csv(r.allergen_tags))
             if tags & allergens:
@@ -400,7 +425,8 @@ class MealPlanService:
         db.add(row)
         return row
 
-    def generate_plan(self, db: Session, user_id_a: int, user_id_b: int, week_start_date) -> Dict:
+    def _week_plan_inputs(self, db: Session, user_id_a: int, user_id_b: int, week_start_date):
+        """generate_plan 和 preview_plan 共用的準備步驟：熱量目標、候選食譜、固定餐點、最愛、湯天。"""
         ctx_a = nutrition_target_service.get_user_context(db, user_id_a, week_start_date)
         ctx_b = nutrition_target_service.get_user_context(db, user_id_b, week_start_date)
         candidates = self._candidate_recipes(db, user_id_a, user_id_b, week_start_date)
@@ -412,10 +438,41 @@ class MealPlanService:
             for i in range(7)
         }
         favorite_ids = favorite_recipe_service.favorite_recipe_ids(db, user_id_a, user_id_b)
-        soup_days = soup_day_preference_service.soup_days(db)
+        soup_days_by_meal = soup_day_preference_service.soup_days_by_meal(db)
+        return ctx_a, ctx_b, candidates, preferred_recipes_by_day, favorite_ids, soup_days_by_meal
+
+    def preview_plan(self, db: Session, user_id_a: int, user_id_b: int, week_start_date) -> Dict:
+        """先照規則式演算法跑一次完整的一週選餐（不寫入 DB），把實際會用到的食譜依類別去重列出來，
+        供使用者在真正寫入週推薦之前先換掉不想要的食譜（見 generate_plan 的 locked_recipes）。"""
+        ctx_a, ctx_b, candidates, preferred_recipes_by_day, favorite_ids, soup_days_by_meal = self._week_plan_inputs(
+            db, user_id_a, user_id_b, week_start_date)
+        days = generate_week_plan(candidates, ctx_a, ctx_b, week_start_date, preferred_recipes_by_day=preferred_recipes_by_day,
+                                   favorite_recipe_ids=favorite_ids, soup_days_by_meal=soup_days_by_meal)
+
+        category_order = ["主食", "肉", "菜", "湯", "早餐", "下午茶"]
+        seen: Dict[str, Dict[int, str]] = {cat: {} for cat in category_order}
+        for day in days:
+            for meal in day["meals"]:
+                cat = meal["category"]
+                seen.setdefault(cat, {})[meal["recipe_id"]] = meal["recipe_name"]
+
+        categories = [
+            {"category": cat, "recipes": [{"recipe_id": rid, "recipe_name": name} for rid, name in sorted(recipes.items(), key=lambda kv: kv[1])]}
+            for cat, recipes in seen.items() if recipes
+        ]
+        return {"categories": categories}
+
+    def generate_plan(self, db: Session, user_id_a: int, user_id_b: int, week_start_date,
+                       locked_recipes: Optional[Dict[str, List[int]]] = None) -> Dict:
+        ctx_a, ctx_b, candidates, preferred_recipes_by_day, favorite_ids, soup_days_by_meal = self._week_plan_inputs(
+            db, user_id_a, user_id_b, week_start_date)
+        allowed_recipes_by_category = (
+            {cat: set(ids) for cat, ids in locked_recipes.items() if ids} if locked_recipes else None
+        )
 
         days = generate_week_plan(candidates, ctx_a, ctx_b, week_start_date, preferred_recipes_by_day=preferred_recipes_by_day,
-                                   favorite_recipe_ids=favorite_ids, soup_days=soup_days)
+                                   favorite_recipe_ids=favorite_ids, soup_days_by_meal=soup_days_by_meal,
+                                   allowed_recipes_by_category=allowed_recipes_by_category)
 
         plan = WeeklyMealPlan(
             plan_date=week_start_date, user_id_a=user_id_a, user_id_b=user_id_b,
@@ -583,12 +640,17 @@ class MealPlanService:
 
         recipe_category = {r["id"]: r["category"] for r in candidates}
         weekly_variety: Dict[str, Set[int]] = {cat: set() for cat in CATEGORY_VARIETY_CAP}
+        recipe_base_weight = {r["id"]: r["base_weight_g"] for r in candidates}
+        recipe_scale_totals: Dict[int, float] = {}
         for m in all_meals:
             if m.meal_date == meal_date:
                 continue
             cat = recipe_category.get(m.recipe_id)
             if cat in weekly_variety:
                 weekly_variety[cat].add(m.recipe_id)
+            base_weight = recipe_base_weight.get(m.recipe_id)
+            if base_weight:
+                recipe_scale_totals[m.recipe_id] = recipe_scale_totals.get(m.recipe_id, 0.0) + (m.serving_weight_g or 0) / base_weight
 
         old_meals = [m for m in all_meals if m.meal_date == meal_date]
         for m in old_meals:
@@ -597,12 +659,13 @@ class MealPlanService:
 
         preferred_recipes = fixed_meal_preference_service.build_preferred_recipes(db, plan.user_id_a, plan.user_id_b, meal_date)
         favorite_ids = favorite_recipe_service.favorite_recipe_ids(db, plan.user_id_a, plan.user_id_b)
-        soup_days = soup_day_preference_service.soup_days(db)
+        soup_days_by_meal = soup_day_preference_service.soup_days_by_meal(db)
+        include_soup_meal_types = {mt for mt, days in soup_days_by_meal.items() if meal_date.weekday() in days}
         meals, _, _ = build_day_meals(candidates, ctx_a, ctx_b, meal_date, usage_counter, cost_counter, yesterday_ids,
                                        preferred_recipes=preferred_recipes, favorite_recipe_ids=favorite_ids,
                                        yesterday_carb_sources=yesterday_carb_sources,
-                                       include_soup=meal_date.weekday() in soup_days,
-                                       weekly_variety=weekly_variety)
+                                       include_soup_meal_types=include_soup_meal_types,
+                                       weekly_variety=weekly_variety, recipe_scale_totals=recipe_scale_totals)
         user_id_by_key = {"A": plan.user_id_a, "B": plan.user_id_b}
         for meal in meals:
             self._write_meal(db, plan_id, user_id_by_key, meal)

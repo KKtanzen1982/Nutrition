@@ -168,6 +168,7 @@ const editForm = reactive<{
   min_threshold_g: number | null
   season: string[]
   cost_level: string
+  exclude_from_recommendations: boolean
 }>({
   ingredient_name: '',
   category: CATEGORIES[0],
@@ -182,6 +183,7 @@ const editForm = reactive<{
   min_threshold_g: null,
   season: [],
   cost_level: '',
+  exclude_from_recommendations: false,
 })
 const savingEdit = ref(false)
 const editError = ref<string | null>(null)
@@ -202,6 +204,7 @@ function startEdit(item: Ingredient) {
     min_threshold_g: item.stock?.min_threshold_g ?? null,
     season: parseSeasonCsv(item.season),
     cost_level: item.cost_level ?? '',
+    exclude_from_recommendations: item.exclude_from_recommendations,
   })
   editError.value = null
   loadLocationPreferences(item.id)
@@ -288,6 +291,7 @@ async function submitEdit(item: Ingredient) {
       needs_stock_tracking: editForm.needs_stock_tracking,
       season: editForm.season.length ? editForm.season.join(',') : null,
       cost_level: editForm.cost_level || null,
+      exclude_from_recommendations: editForm.exclude_from_recommendations,
     })
     if (editForm.needs_stock_tracking) {
       await updateIngredientStock(item.id, {
@@ -318,6 +322,7 @@ const createForm = reactive({
   needs_stock_tracking: false,
   season: [] as string[],
   cost_level: '',
+  exclude_from_recommendations: false,
 })
 const creating = ref(false)
 const createError = ref<string | null>(null)
@@ -341,6 +346,7 @@ async function submitCreate() {
     createForm.needs_stock_tracking = false
     createForm.season = []
     createForm.cost_level = ''
+    createForm.exclude_from_recommendations = false
     showCreate.value = false
     page.value = 1
     reload()
@@ -416,6 +422,13 @@ async function submitCreate() {
         <label class="flex items-center gap-2 self-end text-sm text-tea">
           <input v-model="createForm.needs_stock_tracking" type="checkbox" class="accent-accent" />
           追蹤庫存
+        </label>
+        <label
+          class="flex items-center gap-2 self-end text-sm text-tea"
+          title="勾選後，任何用到這個食材的食譜都不會出現在週推薦候選裡"
+        >
+          <input v-model="createForm.exclude_from_recommendations" type="checkbox" class="accent-accent" />
+          排除推薦
         </label>
       </div>
       <div class="mt-3">
@@ -505,6 +518,7 @@ async function submitCreate() {
                   <span v-if="item.cost_level"> · 成本{{ item.cost_level }}</span>
                   <span v-if="item.season">· {{ item.season }}盛產</span>
                   <span v-if="item.needs_stock_tracking && item.stock"> · 庫存 {{ item.stock.current_quantity_g }}{{ item.stock.unit }}</span>
+                  <span v-if="item.exclude_from_recommendations" class="text-alert"> · 🚫 已排除推薦</span>
                 </p>
               </div>
             </div>
@@ -558,6 +572,13 @@ async function submitCreate() {
             <label class="flex items-center gap-2 self-end text-sm text-tea">
               <input v-model="editForm.needs_stock_tracking" type="checkbox" class="accent-accent" />
               追蹤庫存
+            </label>
+            <label
+              class="flex items-center gap-2 self-end text-sm text-tea"
+              title="勾選後，任何用到這個食材的食譜都不會出現在週推薦候選裡"
+            >
+              <input v-model="editForm.exclude_from_recommendations" type="checkbox" class="accent-accent" />
+              排除推薦
             </label>
             <div class="sm:col-span-3">
               <p class="text-xs text-tea">盛產季節（蔬果類選填，不選＝不分季節）</p>

@@ -16,6 +16,7 @@ class IngredientCreate(BaseModel):
     needs_stock_tracking: bool = False
     season: Optional[str] = None  # 盛產季節（春/夏/秋/冬，逗號分隔），只有蔬果類需要填；不分季節的留空
     cost_level: Optional[str] = None  # 低/中/高，用這道食材的食譜會依食材中最高的等級自動算出成本等級
+    exclude_from_recommendations: bool = False  # 勾選後任何用到這個食材的食譜都不會出現在週推薦候選裡
 
 
 class IngredientUpdate(BaseModel):
@@ -31,6 +32,7 @@ class IngredientUpdate(BaseModel):
     needs_stock_tracking: Optional[bool] = None
     season: Optional[str] = None
     cost_level: Optional[str] = None
+    exclude_from_recommendations: Optional[bool] = None
 
 
 class IngredientStockUpdate(BaseModel):
@@ -106,6 +108,7 @@ class IngredientResponse(BaseModel):
     needs_stock_tracking: bool
     season: Optional[str] = None
     cost_level: Optional[str] = None
+    exclude_from_recommendations: bool = False
     created_at: datetime
 
     class Config:

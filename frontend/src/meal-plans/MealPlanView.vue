@@ -7,6 +7,7 @@ import {
   fetchMealPlan,
   generateMealPlan,
   listMealPlans,
+  previewMealPlan,
   rebalanceDay,
   regenerateDay,
   removeDish,
@@ -27,7 +28,7 @@ import { useLocalStorage } from '../shared/useLocalStorage'
 import { startOfWeekMonday, toISODate, today } from '../shared/date_utils'
 import type {
   DayMeals, ExcludedRecipe, FavoriteRecipe, FixedMealPreference, FixedMealType,
-  MealDetail, MealPlanDetail, MealPlanSummary, MealType, PrepDayMeal, PrepPlan, RecipeSearchResult,
+  MealDetail, MealPlanDetail, MealPlanPreview, MealPlanSummary, MealType, PrepDayMeal, PrepPlan, RecipeSearchResult,
   SharedFixedMealType, SharedMealCategory,
 } from '../shared/types'
 
@@ -244,30 +245,36 @@ async function removeSharedFixedMeal(id: number) {
   }
 }
 
-// ---- 湯品星期：兩人共用一份設定，勾選這天想在午餐/晚餐多喝一道湯，不分誰勾的 ----
+// ---- 湯品星期：兩人共用一份設定，午餐/晚餐各自獨立勾選哪幾天想多喝一道湯，不分誰勾的 ----
 
-const soupDays = ref<number[]>([])
+const soupLunchDays = ref<number[]>([])
+const soupDinnerDays = ref<number[]>([])
 const soupError = ref<string | null>(null)
 const showRules = ref(false)
 
 async function loadSoupDays() {
   soupError.value = null
   try {
-    soupDays.value = (await fetchSoupDays()).days
+    const res = await fetchSoupDays()
+    soupLunchDays.value = res.lunch_days
+    soupDinnerDays.value = res.dinner_days
   } catch (e) {
     soupError.value = e instanceof Error ? e.message : '讀取湯品設定失敗'
   }
 }
 
-function isSoupDay(dayOfWeek: number): boolean {
-  return soupDays.value.includes(dayOfWeek)
+function isSoupDay(mealType: 'lunch' | 'dinner', dayOfWeek: number): boolean {
+  return (mealType === 'lunch' ? soupLunchDays.value : soupDinnerDays.value).includes(dayOfWeek)
 }
 
-async function toggleSoupDay(dayOfWeek: number) {
-  const next = soupDays.value.includes(dayOfWeek) ? soupDays.value.filter((d) => d !== dayOfWeek) : [...soupDays.value, dayOfWeek]
+async function toggleSoupDay(mealType: 'lunch' | 'dinner', dayOfWeek: number) {
+  const current = mealType === 'lunch' ? soupLunchDays.value : soupDinnerDays.value
+  const next = current.includes(dayOfWeek) ? current.filter((d) => d !== dayOfWeek) : [...current, dayOfWeek]
   soupError.value = null
   try {
-    soupDays.value = (await setSoupDays(next)).days
+    const res = mealType === 'lunch' ? await setSoupDays(next, soupDinnerDays.value) : await setSoupDays(soupLunchDays.value, next)
+    soupLunchDays.value = res.lunch_days
+    soupDinnerDays.value = res.dinner_days
   } catch (e) {
     soupError.value = e instanceof Error ? e.message : '更新湯品設定失敗'
   }
@@ -441,50 +448,136 @@ const weekStart = ref(toISODate(startOfWeekMonday(today())))
 const generating = ref(false)
 const generateError = ref<string | null>(null)
 
-async function submitGenerate() {
+// ---- 產生新的一週：已經有目前顯示的週菜單時，另外開個小視窗選日期，不影響目前畫面上的週 ----
+const showGenerateNewWeek = ref(false)
+
+function openGenerateNewWeek() {
+  showGenerateNewWeek.value = true
+  generateError.value = null
+}
+function closeGenerateNewWeek() {
+  showGenerateNewWeek.value = false
+}
+
+// ---- 產生推薦分兩步：先照演算法跑一次選餐，只列出「這週預計會用到的食譜」（依類別去重，不含份量），
+// 讓使用者換掉不想要的食譜；按「寫入本週推薦」才真的排出完整 7 天菜單（含份量／熱量）並存檔。
+// 換掉的食譜清單以 locked_recipes 傳給後端，該類別選餐時只從這份清單裡選（見 selection_algorithm.py）----
+
+const previewData = ref<MealPlanPreview | null>(null)
+const previewWeekStart = ref('')
+const committingPreview = ref(false)
+const commitPreviewError = ref<string | null>(null)
+
+async function runPreview(weekStartDate: string) {
   if (!userA.value || !userB.value) return
   generating.value = true
   generateError.value = null
+  commitPreviewError.value = null
   try {
-    const result = await generateMealPlan({
-      week_start_date: weekStart.value,
+    previewData.value = await previewMealPlan({
+      week_start_date: weekStartDate,
       user_id_a: userA.value.id,
       user_id_b: userB.value.id,
     })
-    plan.value = result
-    setCurrentMealPlanId(result.id)
+    previewWeekStart.value = weekStartDate
+    showGenerateNewWeek.value = false
   } catch (e) {
-    generateError.value = e instanceof Error ? e.message : '推薦生成失敗，請稍後再試'
+    generateError.value = e instanceof Error ? e.message : '產生食譜預覽失敗，請稍後再試'
   } finally {
     generating.value = false
   }
 }
 
-// ---- 整週重新推薦：等同再產生一次同一週的菜單（後端每次產生都是新的一筆，不會覆蓋），
-// 產生後直接切換過去看新結果 ----
+function submitGenerate() {
+  runPreview(weekStart.value)
+}
 
-const regeneratingWeek = ref(false)
+function cancelPreview() {
+  previewData.value = null
+  commitPreviewError.value = null
+}
 
-async function submitRegenerateWeek() {
-  if (!plan.value || !userA.value || !userB.value) return
-  const ok = await confirmDialog(`確定要整週重新推薦「${plan.value.plan_date} 那一週」嗎？目前的安排（含你手動調整過的部分）不會被覆蓋，但畫面會切換到新產生的版本。`)
-  if (!ok) return
-  regeneratingWeek.value = true
-  generateError.value = null
+async function submitCommitPreview() {
+  if (!previewData.value || !userA.value || !userB.value) return
+  committingPreview.value = true
+  commitPreviewError.value = null
   try {
+    const lockedRecipes: Record<string, number[]> = {}
+    for (const cat of previewData.value.categories) {
+      lockedRecipes[cat.category] = cat.recipes.map((r) => r.recipe_id)
+    }
     const result = await generateMealPlan({
-      week_start_date: plan.value.plan_date,
+      week_start_date: previewWeekStart.value,
       user_id_a: userA.value.id,
       user_id_b: userB.value.id,
+      locked_recipes: lockedRecipes,
     })
     plan.value = result
     setCurrentMealPlanId(result.id)
+    previewData.value = null
     await loadOtherPlans()
   } catch (e) {
-    generateError.value = e instanceof Error ? e.message : '整週重新推薦失敗，請稍後再試'
+    commitPreviewError.value = e instanceof Error ? e.message : '寫入本週推薦失敗，請稍後再試'
   } finally {
-    regeneratingWeek.value = false
+    committingPreview.value = false
   }
+}
+
+// ---- 預覽清單裡換掉某個類別的某道食譜：搜尋同類別的食譜，選中後就地取代 ----
+
+const previewSwapTarget = ref<{ category: string; recipeId: number } | null>(null)
+const previewSwapQuery = ref('')
+const previewSwapResults = ref<RecipeSearchResult[]>([])
+const previewSwapSearching = ref(false)
+
+function openPreviewSwap(category: string, recipeId: number) {
+  previewSwapTarget.value = { category, recipeId }
+  previewSwapQuery.value = ''
+  previewSwapResults.value = []
+}
+function closePreviewSwap() {
+  previewSwapTarget.value = null
+}
+
+async function runPreviewSwapSearch() {
+  if (!previewSwapQuery.value.trim() || !previewSwapTarget.value) return
+  previewSwapSearching.value = true
+  try {
+    previewSwapResults.value = await searchRecipesByName(previewSwapQuery.value.trim(), previewSwapTarget.value.category)
+  } catch (e) {
+    commitPreviewError.value = e instanceof Error ? e.message : '搜尋失敗'
+  } finally {
+    previewSwapSearching.value = false
+  }
+}
+
+function choosePreviewSwap(recipeId: number, recipeName: string) {
+  if (!previewData.value || !previewSwapTarget.value) return
+  const { category, recipeId: oldId } = previewSwapTarget.value
+  const cat = previewData.value.categories.find((c) => c.category === category)
+  if (!cat) return
+  cat.recipes = [
+    ...cat.recipes.filter((r) => r.recipe_id !== oldId && r.recipe_id !== recipeId),
+    { recipe_id: recipeId, recipe_name: recipeName },
+  ]
+  closePreviewSwap()
+}
+
+function removePreviewRecipe(category: string, recipeId: number) {
+  if (!previewData.value) return
+  const cat = previewData.value.categories.find((c) => c.category === category)
+  if (!cat) return
+  cat.recipes = cat.recipes.filter((r) => r.recipe_id !== recipeId)
+}
+
+// ---- 整週重新推薦：等同再產生一次同一週的菜單（後端每次產生都是新的一筆，不會覆蓋），
+// 一樣先跑預覽讓你確認/調整食譜，寫入後直接切換過去看新結果 ----
+
+async function submitRegenerateWeek() {
+  if (!plan.value || !userA.value || !userB.value) return
+  const ok = await confirmDialog(`確定要整週重新推薦「${plan.value.plan_date} 那一週」嗎？目前的安排（含你手動調整過的部分）不會被覆蓋，但確認預覽後畫面會切換到新產生的版本。`)
+  if (!ok) return
+  await runPreview(plan.value.plan_date)
 }
 
 // ---- 查看其他週：後端每次「產生」都會留下一筆新紀錄，這裡列出兩人名下所有週菜單讓你切換查看 ----
@@ -803,6 +896,51 @@ function dayLabel(day: DayMeals): string {
   return weekday ?? day.date
 }
 
+// ---- 單日詳細營養：點某一天看完整逐餐明細（含各營養素統計），不只是食譜種類跟重量 ----
+
+const dayDetailDate = ref<string | null>(null)
+function openDayDetail(date: string) {
+  dayDetailDate.value = date
+}
+function closeDayDetail() {
+  dayDetailDate.value = null
+}
+const dayDetailDay = computed(() => plan.value?.days.find((d) => d.date === dayDetailDate.value) ?? null)
+
+interface NutrientTotals {
+  calories: number
+  protein_g: number
+  carbs_g: number
+  fat_g: number
+  fiber_g: number
+}
+
+function dayNutrientSummary(day: DayMeals, userId: number): NutrientTotals {
+  const totals: NutrientTotals = { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0 }
+  for (const m of day.meals) {
+    if (m.assigned_user_id !== userId) continue
+    totals.calories += m.calories ?? 0
+    totals.protein_g += m.protein_g ?? 0
+    totals.carbs_g += m.carbs_g ?? 0
+    totals.fat_g += m.fat_g ?? 0
+    totals.fiber_g += m.fiber_g ?? 0
+  }
+  return {
+    calories: Math.round(totals.calories),
+    protein_g: Math.round(totals.protein_g * 10) / 10,
+    carbs_g: Math.round(totals.carbs_g * 10) / 10,
+    fat_g: Math.round(totals.fat_g * 10) / 10,
+    fiber_g: Math.round(totals.fiber_g * 10) / 10,
+  }
+}
+
+function dailyCaloriesTargetFor(userId: number): number | null {
+  if (!plan.value) return null
+  if (userId === plan.value.user_id_a) return plan.value.user_a_daily_calories_target
+  if (userId === plan.value.user_id_b) return plan.value.user_b_daily_calories_target
+  return null
+}
+
 // ---- 兩人菜單多半一致，中式一餐又拆成主食/肉/菜三道：把同一餐兩人的三道菜分組顯示，
 // 相同的菜合併成一行（公克不同就兩個都列出），真的不同的菜收進「差異」摺疊區，避免整頁看起來一團亂 ----
 
@@ -1090,16 +1228,32 @@ function toggleDiffExpanded(date: string) {
         <div v-if="showRules" class="mt-3 space-y-4">
           <div>
             <p class="text-sm font-semibold text-ink">湯品星期（兩人共用）</p>
-            <p class="text-xs text-tea">勾選這天想在午餐/晚餐多喝一道湯</p>
+            <p class="text-xs text-tea">午餐/晚餐各自勾選哪幾天想多喝一道湯，同一天兩餐都要就都勾</p>
             <p v-if="soupError" class="mt-2 rounded-lg bg-alert/10 px-3 py-2 text-xs text-alert">{{ soupError }}</p>
-            <div class="mt-2 flex flex-wrap gap-2">
+
+            <p class="mt-2 text-xs font-semibold text-tea">午餐</p>
+            <div class="mt-1 flex flex-wrap gap-2">
               <button
                 v-for="(label, dow) in SOUP_WEEKDAY_LABELS"
-                :key="dow"
+                :key="`lunch-${dow}`"
                 type="button"
                 class="rounded-full border px-3 py-1 text-xs"
-                :class="isSoupDay(dow) ? 'border-accent bg-accent text-on-accent' : 'border-ink/15 text-ink hover:bg-bg'"
-                @click="toggleSoupDay(dow)"
+                :class="isSoupDay('lunch', dow) ? 'border-accent bg-accent text-on-accent' : 'border-ink/15 text-ink hover:bg-bg'"
+                @click="toggleSoupDay('lunch', dow)"
+              >
+                {{ label }}
+              </button>
+            </div>
+
+            <p class="mt-3 text-xs font-semibold text-tea">晚餐</p>
+            <div class="mt-1 flex flex-wrap gap-2">
+              <button
+                v-for="(label, dow) in SOUP_WEEKDAY_LABELS"
+                :key="`dinner-${dow}`"
+                type="button"
+                class="rounded-full border px-3 py-1 text-xs"
+                :class="isSoupDay('dinner', dow) ? 'border-accent bg-accent text-on-accent' : 'border-ink/15 text-ink hover:bg-bg'"
+                @click="toggleSoupDay('dinner', dow)"
               >
                 {{ label }}
               </button>
@@ -1234,7 +1388,7 @@ function toggleDiffExpanded(date: string) {
         </div>
       </section>
 
-      <div v-if="!plan && !loadingPlan" class="mt-4 rounded-2xl border border-ink/10 bg-surface p-6">
+      <div v-if="!plan && !loadingPlan && !previewData" class="mt-4 rounded-2xl border border-ink/10 bg-surface p-6">
         <div class="flex items-center gap-1.5">
           <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-ink" aria-hidden="true" />
           <h1 class="border-b-[1.5px] border-accent pb-1 text-[11.5px] font-semibold uppercase tracking-wide text-muted">
@@ -1242,7 +1396,7 @@ function toggleDiffExpanded(date: string) {
           </h1>
         </div>
         <p class="mt-3 text-sm text-tea">
-          為 {{ userA?.name }} 和 {{ userB?.name }} 產生一週菜單，依雙方的目標熱量與食譜資料庫規則式安排。
+          為 {{ userA?.name }} 和 {{ userB?.name }} 產生一週菜單，依雙方的目標熱量與食譜資料庫規則式安排。會先列出預計用到的食譜供你調整，確認後才正式寫入。
         </p>
         <div class="mt-4">
           <label class="mb-1 block text-xs text-tea">週一日期</label>
@@ -1255,7 +1409,95 @@ function toggleDiffExpanded(date: string) {
           :disabled="generating"
           @click="submitGenerate"
         >
-          {{ generating ? '產生中…' : '產生推薦' }}
+          {{ generating ? '產生中…' : '產生食譜預覽' }}
+        </button>
+      </div>
+
+      <p v-if="generating && !previewData" class="mt-4 text-sm text-tea">正在挑選這週的食譜…</p>
+
+      <div v-if="previewData" class="mt-4 rounded-2xl border border-accent/60 bg-accent-tint/30 p-4">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 class="font-serif text-lg text-ink">預計使用的食譜（{{ previewWeekStart }} 那一週）</h2>
+            <p class="mt-1 text-xs text-tea">確認或換掉食譜後，按「寫入本週推薦」才會正式排出每日菜單（含份量、熱量）並存檔</p>
+          </div>
+          <div class="flex shrink-0 gap-2">
+            <button
+              type="button"
+              class="rounded-full border border-ink/15 px-3 py-1.5 text-xs font-semibold text-ink hover:bg-bg disabled:opacity-50"
+              :disabled="generating"
+              @click="runPreview(previewWeekStart)"
+            >
+              {{ generating ? '重新產生中…' : '重新產生候選' }}
+            </button>
+            <button type="button" class="rounded-full border border-ink/15 px-3 py-1.5 text-xs font-semibold text-tea hover:bg-bg" @click="cancelPreview">
+              取消
+            </button>
+          </div>
+        </div>
+
+        <p v-if="generateError" class="mt-3 rounded-lg bg-alert/10 px-3 py-2 text-xs text-alert">{{ generateError }}</p>
+        <p v-if="commitPreviewError" class="mt-3 rounded-lg bg-alert/10 px-3 py-2 text-xs text-alert">{{ commitPreviewError }}</p>
+
+        <div class="mt-3 grid gap-3 sm:grid-cols-2">
+          <div v-for="cat in previewData.categories" :key="cat.category" class="rounded-xl border border-ink/10 bg-surface p-3">
+            <p class="text-sm font-semibold text-ink">{{ cat.category }}</p>
+            <ul v-if="cat.recipes.length" class="mt-2 divide-y divide-ink/10">
+              <li v-for="r in cat.recipes" :key="r.recipe_id" class="flex items-center justify-between py-1.5 text-sm">
+                <span class="min-w-0 flex-1 truncate text-ink">{{ r.recipe_name }}</span>
+                <span class="flex shrink-0 gap-2">
+                  <button type="button" class="text-xs font-semibold text-accent hover:text-accent-bright" @click="openPreviewSwap(cat.category, r.recipe_id)">
+                    換掉
+                  </button>
+                  <button type="button" class="text-xs text-tea hover:text-alert" @click="removePreviewRecipe(cat.category, r.recipe_id)">
+                    移除
+                  </button>
+                </span>
+              </li>
+            </ul>
+            <p v-else class="mt-2 text-xs text-tea">已全部移除，寫入時這個類別會改用完整食譜庫</p>
+
+            <div v-if="previewSwapTarget && previewSwapTarget.category === cat.category" class="mt-2 rounded-lg border border-accent bg-accent-tint/50 p-2">
+              <div class="flex items-center justify-between">
+                <p class="text-xs text-ink">選一個「{{ cat.category }}」食譜替換</p>
+                <button type="button" class="text-xs text-tea hover:text-ink" @click="closePreviewSwap">關閉</button>
+              </div>
+              <div class="mt-1.5 flex gap-1.5">
+                <input
+                  v-model="previewSwapQuery"
+                  type="text"
+                  placeholder="食譜名稱"
+                  class="w-full rounded-lg border border-ink/15 bg-bg px-2.5 py-1.5 text-xs text-ink"
+                  @keydown.enter="runPreviewSwapSearch"
+                />
+                <button
+                  type="button"
+                  class="shrink-0 rounded-lg border border-ink/15 px-2.5 py-1.5 text-xs font-semibold text-ink hover:bg-bg disabled:opacity-50"
+                  :disabled="previewSwapSearching"
+                  @click="runPreviewSwapSearch"
+                >
+                  {{ previewSwapSearching ? '搜尋中…' : '搜尋' }}
+                </button>
+              </div>
+              <ul v-if="previewSwapResults.length" class="mt-1.5 divide-y divide-ink/10">
+                <li v-for="pr in previewSwapResults" :key="pr.id" class="flex items-center justify-between py-1 text-xs">
+                  <span class="text-ink">{{ pr.recipe_name }}</span>
+                  <button type="button" class="font-semibold text-accent hover:text-accent-bright" @click="choosePreviewSwap(pr.id, pr.recipe_name)">
+                    選這個
+                  </button>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          class="mt-4 w-full rounded-full bg-accent py-2.5 text-sm font-semibold text-on-accent hover:bg-accent-bright disabled:opacity-50"
+          :disabled="committingPreview"
+          @click="submitCommitPreview"
+        >
+          {{ committingPreview ? '寫入中…' : '確定，寫入本週推薦' }}
         </button>
       </div>
 
@@ -1315,13 +1557,41 @@ function toggleDiffExpanded(date: string) {
             </p>
           </div>
           <div class="flex shrink-0 items-start gap-2">
+            <div class="relative">
+              <button
+                type="button"
+                class="rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold text-ink hover:bg-bg"
+                @click="showGenerateNewWeek ? closeGenerateNewWeek() : openGenerateNewWeek()"
+              >
+                產生新的一週
+              </button>
+              <div
+                v-if="showGenerateNewWeek"
+                class="absolute left-0 top-full z-20 mt-1 w-64 rounded-xl border border-ink/10 bg-surface p-3 shadow-lg"
+              >
+                <div class="flex items-center justify-between">
+                  <p class="text-xs text-ink">選一個週一日期產生新的一週</p>
+                  <button type="button" class="text-xs text-tea hover:text-ink" @click="closeGenerateNewWeek">關閉</button>
+                </div>
+                <input v-model="weekStart" type="date" class="mt-2 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
+                <p v-if="generateError" class="mt-2 rounded-lg bg-alert/10 px-3 py-2 text-xs text-alert">{{ generateError }}</p>
+                <button
+                  type="button"
+                  class="mt-2 w-full rounded-full bg-accent py-2 text-sm font-semibold text-on-accent hover:bg-accent-bright disabled:opacity-50"
+                  :disabled="generating"
+                  @click="submitGenerate"
+                >
+                  {{ generating ? '產生中…' : '產生食譜預覽' }}
+                </button>
+              </div>
+            </div>
             <button
               type="button"
               class="rounded-full border border-accent px-4 py-2 text-sm font-semibold text-accent hover:bg-accent hover:text-on-accent disabled:opacity-50"
-              :disabled="regeneratingWeek"
+              :disabled="generating"
               @click="submitRegenerateWeek"
             >
-              {{ regeneratingWeek ? '推薦中…' : '整週重新推薦' }}
+              {{ generating ? '推薦中…' : '整週重新推薦' }}
             </button>
             <div class="text-right">
               <button
@@ -1347,7 +1617,13 @@ function toggleDiffExpanded(date: string) {
             :class="regeneratingDay === day.date && 'opacity-50'"
           >
             <div class="flex items-center justify-between">
-              <p class="text-xs font-semibold uppercase tracking-wide text-muted">{{ dayLabel(day) }} · {{ day.date }}</p>
+              <button
+                type="button"
+                class="text-left text-xs font-semibold uppercase tracking-wide text-muted hover:text-accent"
+                @click="openDayDetail(day.date)"
+              >
+                {{ dayLabel(day) }} · {{ day.date }} <span class="text-accent">詳細▸</span>
+              </button>
               <div class="flex shrink-0 gap-2">
                 <button
                   type="button"
@@ -1585,6 +1861,85 @@ function toggleDiffExpanded(date: string) {
               >
                 {{ rebalancingDay === mealEditor.date ? '計算中…' : '重算這天的份量' }}
               </button>
+            </section>
+          </div>
+        </Teleport>
+
+        <!-- 單日詳細營養：逐餐明細 + 各營養素統計，不只是食譜種類跟重量 -->
+        <Teleport to="body">
+          <div v-if="dayDetailDay" class="fixed inset-0 z-30 flex justify-end">
+            <div class="absolute inset-0 bg-ink/35" @click="closeDayDetail" />
+            <section class="relative flex h-full w-full max-w-lg flex-col overflow-y-auto border-l-2 border-accent bg-surface p-4 shadow-xl">
+              <div class="flex items-center justify-between">
+                <p class="text-sm text-ink">{{ dayLabel(dayDetailDay) }} · {{ dayDetailDay.date }} 詳細營養</p>
+                <button type="button" class="text-xs text-tea hover:text-ink" @click="closeDayDetail">關閉 ✕</button>
+              </div>
+
+              <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                <div v-for="user in [userA, userB]" :key="user ? `nut-${user.id}` : ''">
+                  <div v-if="user" class="rounded-xl border border-ink/10 p-3">
+                    <p class="text-sm font-semibold text-ink">{{ user.name }}</p>
+                    <p class="text-xs text-tea">目標 {{ dailyCaloriesTargetFor(user.id) }}kcal</p>
+                    <dl class="mt-2 space-y-1 text-xs text-ink">
+                      <div class="flex justify-between">
+                        <dt class="text-tea">熱量</dt>
+                        <dd>{{ dayNutrientSummary(dayDetailDay, user.id).calories }} kcal</dd>
+                      </div>
+                      <div class="flex justify-between">
+                        <dt class="text-tea">蛋白質</dt>
+                        <dd>{{ dayNutrientSummary(dayDetailDay, user.id).protein_g }} g</dd>
+                      </div>
+                      <div class="flex justify-between">
+                        <dt class="text-tea">碳水</dt>
+                        <dd>{{ dayNutrientSummary(dayDetailDay, user.id).carbs_g }} g</dd>
+                      </div>
+                      <div class="flex justify-between">
+                        <dt class="text-tea">脂肪</dt>
+                        <dd>{{ dayNutrientSummary(dayDetailDay, user.id).fat_g }} g</dd>
+                      </div>
+                      <div class="flex justify-between">
+                        <dt class="text-tea">纖維</dt>
+                        <dd>{{ dayNutrientSummary(dayDetailDay, user.id).fiber_g }} g</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mt-4">
+                <p class="text-xs font-semibold uppercase tracking-wide text-muted">逐餐明細</p>
+                <template v-for="mt in MEAL_TYPE_DISPLAY_ORDER" :key="mt">
+                  <div v-if="dayDetailDay.meals.some((m) => m.meal_type === mt)" class="mt-2">
+                    <p class="text-xs font-semibold text-tea">{{ mealTypeLabel(mt) }}</p>
+                    <table class="mt-1 w-full text-xs">
+                      <thead>
+                        <tr class="text-left text-tea">
+                          <th class="py-1 pr-2 font-normal">使用者</th>
+                          <th class="py-1 pr-2 font-normal">食譜</th>
+                          <th class="py-1 pr-2 font-normal">克重</th>
+                          <th class="py-1 pr-2 font-normal">熱量</th>
+                          <th class="py-1 pr-2 font-normal">蛋白質</th>
+                          <th class="py-1 pr-2 font-normal">碳水</th>
+                          <th class="py-1 font-normal">脂肪</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="m in dayDetailDay.meals.filter((x) => x.meal_type === mt)" :key="m.id" class="border-t border-ink/10 text-ink">
+                          <td class="py-1 pr-2">{{ userName(m.assigned_user_id) }}</td>
+                          <td class="py-1 pr-2">
+                            {{ m.recipe_name }}<span v-if="m.recipe_category" class="text-tea">（{{ m.recipe_category }}）</span>
+                          </td>
+                          <td class="py-1 pr-2">{{ m.serving_weight_g }}g</td>
+                          <td class="py-1 pr-2">{{ m.calories }}</td>
+                          <td class="py-1 pr-2">{{ m.protein_g }}g</td>
+                          <td class="py-1 pr-2">{{ m.carbs_g }}g</td>
+                          <td class="py-1">{{ m.fat_g }}g</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </template>
+              </div>
             </section>
           </div>
         </Teleport>

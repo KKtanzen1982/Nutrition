@@ -1,12 +1,22 @@
 from datetime import date
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
+
+
+class PreviewMealPlanRequest(BaseModel):
+    user_id_a: int
+    user_id_b: int
+    week_start_date: date
 
 
 class GenerateMealPlanRequest(BaseModel):
     user_id_a: int
     user_id_b: int
     week_start_date: date
+    locked_recipes: Optional[Dict[str, List[int]]] = Field(
+        None, description="產生預覽後使用者確認/調整過的每類別食譜清單（見 /meal-plans/preview）；"
+                           "有傳的話該類別只從這份清單挑，篩不到才退回完整候選池"
+    )
 
 
 class SetManualCaloriesTargetRequest(BaseModel):
@@ -55,7 +65,8 @@ class SetFavoriteRecipeRequest(BaseModel):
 
 
 class SetSoupDaysRequest(BaseModel):
-    days: List[int] = Field(default_factory=list)  # 0=週一...6=週日
+    lunch_days: List[int] = Field(default_factory=list)  # 0=週一...6=週日，午餐要喝湯的星期
+    dinner_days: List[int] = Field(default_factory=list)  # 晚餐要喝湯的星期，跟 lunch_days 各自獨立
 
 
 class AddDishRequest(BaseModel):

@@ -352,7 +352,8 @@ export interface FavoriteRecipe {
 }
 
 export interface SoupDayPreference {
-  days: number[] // 0=週一...6=週日
+  lunch_days: number[] // 0=週一...6=週日，午餐要喝湯的星期
+  dinner_days: number[] // 晚餐要喝湯的星期，跟 lunch_days 各自獨立
 }
 
 export interface PrepDish {
@@ -409,6 +410,27 @@ export interface GenerateMealPlanPayload {
   week_start_date: string
   user_id_a: number
   user_id_b: number
+  locked_recipes?: Record<string, number[]> | null
+}
+
+export interface PreviewMealPlanPayload {
+  week_start_date: string
+  user_id_a: number
+  user_id_b: number
+}
+
+export interface PreviewRecipe {
+  recipe_id: number
+  recipe_name: string
+}
+
+export interface PreviewCategory {
+  category: string
+  recipes: PreviewRecipe[]
+}
+
+export interface MealPlanPreview {
+  categories: PreviewCategory[]
 }
 
 export interface MealPlanSummary {
@@ -547,6 +569,7 @@ export interface Ingredient {
   needs_stock_tracking: boolean
   season: string | null
   cost_level: string | null
+  exclude_from_recommendations: boolean
   created_at: string
   stock: IngredientStock | null
 }
@@ -590,6 +613,7 @@ export interface CreateIngredientPayload {
   needs_stock_tracking?: boolean
   season?: string | null
   cost_level?: string | null
+  exclude_from_recommendations?: boolean
 }
 
 export type UpdateIngredientPayload = Partial<CreateIngredientPayload>

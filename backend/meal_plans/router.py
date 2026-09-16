@@ -5,7 +5,7 @@ from datetime import date
 
 from database import get_db
 from meal_plans.schemas import (
-    GenerateMealPlanRequest, ReplaceMealRequest, SearchReplaceMealRequest,
+    GenerateMealPlanRequest, PreviewMealPlanRequest, ReplaceMealRequest, SearchReplaceMealRequest,
     AdjustServingWeightRequest, RegenerateDayRequest, SetFixedMealPreferenceRequest,
     SetExcludedRecipeRequest, SetFavoriteRecipeRequest, SetSoupDaysRequest,
     AddDishRequest, RebalanceDayRequest, SetManualCaloriesTargetRequest,
@@ -114,23 +114,34 @@ def remove_favorite_recipe(favorite_id: int, db: Session = Depends(get_db)):
 
 @router.get("/soup-day-preferences")
 def list_soup_days(db: Session = Depends(get_db)):
-    """列出勾選「想喝湯」的星期（0=週一...6=週日），兩人共用一份"""
-    return {"days": soup_day_preference_service.list_days(db)}
+    """列出午餐/晚餐各自勾選「想喝湯」的星期（0=週一...6=週日），兩人共用一份"""
+    return soup_day_preference_service.list_days(db)
 
 
 @router.put("/soup-day-preferences")
 def set_soup_days(payload: SetSoupDaysRequest, db: Session = Depends(get_db)):
     try:
-        days = soup_day_preference_service.set_days(db, payload.days)
+        return soup_day_preference_service.set_days(db, payload.lunch_days, payload.dinner_days)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"days": days}
+
+
+@router.post("/meal-plans/preview")
+def preview_meal_plan(payload: PreviewMealPlanRequest, db: Session = Depends(get_db)):
+    """先照規則式演算法跑一次完整選餐，回傳實際會用到的食譜（依類別去重列出），不寫入 DB。
+    使用者可以在這份清單裡把不想要的食譜換掉，再呼叫 /meal-plans/generate 帶上 locked_recipes 正式寫入。"""
+    try:
+        return meal_plan_service.preview_plan(db, payload.user_id_a, payload.user_id_b, payload.week_start_date)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/meal-plans/generate")
 def generate_meal_plan(payload: GenerateMealPlanRequest, db: Session = Depends(get_db)):
     try:
-        return meal_plan_service.generate_plan(db, payload.user_id_a, payload.user_id_b, payload.week_start_date)
+        return meal_plan_service.generate_plan(
+            db, payload.user_id_a, payload.user_id_b, payload.week_start_date, payload.locked_recipes
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

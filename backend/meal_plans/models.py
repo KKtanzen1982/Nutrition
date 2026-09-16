@@ -98,13 +98,17 @@ class FavoriteRecipe(Base):
 
 
 class SoupDayPreference(Base):
-    """勾選「這天想喝湯」（午餐/晚餐），兩人共用一份設定，不分誰勾的"""
+    """勾選「這天這一餐想喝湯」，兩人共用一份設定，不分誰勾的。一天要午餐晚餐都喝湯就會有兩筆
+    （同一個 day_of_week，meal_type 分別是 lunch 和 dinner）。"""
 
     __tablename__ = "soup_day_preferences"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    day_of_week = Column(Integer, nullable=False, unique=True)  # 0=週一...6=週日，對應 date.weekday()
+    day_of_week = Column(Integer, nullable=False)  # 0=週一...6=週日，對應 date.weekday()
+    meal_type = Column(String(20), nullable=False, default="lunch")  # "lunch" 或 "dinner"
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("day_of_week", "meal_type", name="uq_soup_day_preferences_day_meal"),)
 
 
 class MealAdjustment(Base):

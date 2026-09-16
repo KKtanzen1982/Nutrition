@@ -5,12 +5,18 @@ import type {
   ConfirmMealPlanResponse,
   GenerateMealPlanPayload,
   MealPlanDetail,
+  MealPlanPreview,
   MealPlanSummary,
+  PreviewMealPlanPayload,
   RebalanceDayPayload,
   RegenerateDayPayload,
   ReplaceMealPayload,
   SearchAndReplacePayload,
 } from '../shared/types'
+
+export function previewMealPlan(payload: PreviewMealPlanPayload): Promise<MealPlanPreview> {
+  return apiPost('/meal-plans/preview', payload)
+}
 
 export function generateMealPlan(payload: GenerateMealPlanPayload): Promise<MealPlanDetail> {
   return apiPost('/meal-plans/generate', payload)

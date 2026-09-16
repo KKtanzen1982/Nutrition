@@ -114,6 +114,11 @@ def _add_missing_columns():
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS manual_calories_target FLOAT"))
         conn.execute(text("ALTER TABLE ingredient_library ADD COLUMN IF NOT EXISTS season VARCHAR(20)"))
         conn.execute(text("ALTER TABLE ingredient_library ADD COLUMN IF NOT EXISTS cost_level VARCHAR(20)"))
+        conn.execute(text("ALTER TABLE ingredient_library ADD COLUMN IF NOT EXISTS exclude_from_recommendations BOOLEAN NOT NULL DEFAULT FALSE"))
+        # 湯品星期舊表是「day_of_week 唯一」（一天不分午晚餐），改成「day_of_week+meal_type 唯一」
+        # 才能同一天分開設定午餐/晚餐要不要喝湯；舊資料視為原本的午餐設定（見 SoupDayPreferenceService）
+        conn.execute(text("ALTER TABLE soup_day_preferences ADD COLUMN IF NOT EXISTS meal_type VARCHAR(20) NOT NULL DEFAULT 'lunch'"))
+        conn.execute(text("ALTER TABLE soup_day_preferences DROP CONSTRAINT IF EXISTS soup_day_preferences_day_of_week_key"))
         conn.execute(text("ALTER TABLE fixed_meal_preferences ADD COLUMN IF NOT EXISTS start_date DATE NOT NULL DEFAULT CURRENT_DATE"))
         conn.execute(text("ALTER TABLE fixed_meal_preferences ADD COLUMN IF NOT EXISTS duration_days INTEGER"))
         conn.execute(text("ALTER TABLE fixed_meal_preferences ADD COLUMN IF NOT EXISTS category VARCHAR(20)"))
