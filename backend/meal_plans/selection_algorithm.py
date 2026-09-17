@@ -50,6 +50,12 @@ OVERSHOOT_PENALTY_MULTIPLIER = 1.5  # 熱量超過目標比不足目標扣更多
 # （用 _cal_penalty 同一單位），0.15 大約等於允許多 10% 左右的額外熱量偏差。
 COST_BALANCE_MAX_EXTRA_PENALTY = 0.15
 
+# 低成本選項不夠多時（例如某類別食譜庫裡低成本只有 1-2 道），不強制鎖進 low_only：那樣等於每次
+# 都被壓縮到同一 1-2 道候選，跟 RANDOM_TIE_TOLERANCE 想做到的「同輸入也能選到不同食譜」互相打架
+# ——候選池夠大的多樣性才有意義。低於這個門檻時退而求其次，改用 low_or_mid（低+中成本），
+# 範圍變大，兼顧「別太常選高成本」跟「還有得選、選得出變化」。
+COST_BALANCE_MIN_LOW_POOL_FOR_LOCK = 3
+
 # 整週菜色多樣性上限：這幾個類別一週最多出現幾種「不同」食譜（不是次數上限，是種類上限）。
 # 一旦某類別已經用滿上限種類，候選池會限縮成只剩已經用過的那幾種，之後只在這幾種裡面選。
 CATEGORY_VARIETY_CAP = {"主食": 3, "肉": 3, "菜": 3, "下午茶": 2}
@@ -218,12 +224,14 @@ def select_recipe_for_slot(candidates: List[Dict], category: str, target_calorie
         pool = not_high or pool
 
     # 低成本 vs 中/高成本的平衡：中高成本用得跟低成本差不多多時，優先只用低成本，
-    # 但低成本熱量貼合度太差時（見 COST_BALANCE_MAX_EXTRA_PENALTY）改用中成本補
+    # 但低成本熱量貼合度太差時（見 COST_BALANCE_MAX_EXTRA_PENALTY）或低成本選項太少時
+    # （見 COST_BALANCE_MIN_LOW_POOL_FOR_LOCK，避免每次都鎖進同 1-2 道）改用中成本補
     # （而不是直接放行到含高成本的完整候選池），中成本也選不到才退回目前候選池（安全防呆）
     if mid_count + high_count + 1 >= low_count:
         low_only = [r for r in pool if r["cost_level"] == "低"]
-        if low_only and (_best_cal_fit(low_only, target_calories, secondary_target, recipe_scale_totals)
-                          - _best_cal_fit(pool, target_calories, secondary_target, recipe_scale_totals)) <= COST_BALANCE_MAX_EXTRA_PENALTY:
+        if (len(low_only) >= COST_BALANCE_MIN_LOW_POOL_FOR_LOCK
+                and (_best_cal_fit(low_only, target_calories, secondary_target, recipe_scale_totals)
+                     - _best_cal_fit(pool, target_calories, secondary_target, recipe_scale_totals)) <= COST_BALANCE_MAX_EXTRA_PENALTY):
             pool = low_only
         else:
             low_or_mid = [r for r in pool if r["cost_level"] in ("低", "中")]
