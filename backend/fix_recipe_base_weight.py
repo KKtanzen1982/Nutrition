@@ -13,6 +13,7 @@
 """
 import json
 import sys
+import urllib.parse
 import urllib.request
 
 THRESHOLD_PCT = 0.10
@@ -22,7 +23,8 @@ WATER_NAME = "水"
 
 def call(base, method, path, body=None):
     data = json.dumps(body).encode("utf-8") if body is not None else None
-    req = urllib.request.Request(base + path, data=data, method=method,
+    url = base + urllib.parse.quote(path, safe="/?=&")
+    req = urllib.request.Request(url, data=data, method=method,
                                   headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req) as resp:
         raw = resp.read()
