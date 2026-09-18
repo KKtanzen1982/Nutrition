@@ -44,7 +44,11 @@ const navLinks = [
       <div class="mx-auto max-w-5xl px-4 pt-4">
         <UserSwitcher />
       </div>
-      <RouterView />
+      <RouterView v-slot="{ Component }">
+        <KeepAlive>
+          <component :is="Component" />
+        </KeepAlive>
+      </RouterView>
       <ConfirmDialog />
     </div>
   </AccessGate>

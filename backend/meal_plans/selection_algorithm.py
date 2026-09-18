@@ -159,6 +159,7 @@ def select_recipe_for_slot(candidates: List[Dict], category: str, target_calorie
                             require_recipe_name_in: Optional[Set[str]] = None,
                             require_pairing_style: Optional[str] = None,
                             allowed_recipe_ids: Optional[Set[int]] = None,
+                            exclude_recipe_ids: Optional[Set[int]] = None,
                             recipe_scale_totals: Optional[Dict[int, float]] = None,
                             rng: Optional[random.Random] = None) -> Optional[Dict]:
     """secondary_target: (calories, protein_g)，共食類餐點（午餐/晚餐）兩人熱量目標常常差很多，
@@ -169,6 +170,8 @@ def select_recipe_for_slot(candidates: List[Dict], category: str, target_calorie
     （安全防呆，避免因為食譜庫選項不夠而選不到菜）；pairing_style 沒標的食譜（None）視為百搭，不會被篩掉。
     allowed_recipe_ids：使用者在「產生預覽」階段確認過的候選食譜清單（見 MealPlanService.preview_plan），
     有傳的話這個類別只從這份清單裡選，篩不到（例如清單裡的食譜這一格因白飯規則被排除）才退回原候選池。
+    exclude_recipe_ids：「重新產生候選」時要排除的食譜（本次推薦流程裡這個類別已經展示過的），
+    篩完是空池才退回原候選池（同樣的安全防呆，避免候選池太小時重推變成選不到菜）。
     recipe_scale_totals：見 _min_scale_for_recipe，評分時用來判斷某個候選這一格能不能縮到比
     SERVING_SCALE_MIN 更小。
     rng：見模組開頭「隨機性說明」，決定分數相近的候選裡選哪一個，預設用全域 random 模組。"""
@@ -180,6 +183,10 @@ def select_recipe_for_slot(candidates: List[Dict], category: str, target_calorie
 
     if allowed_recipe_ids is not None:
         filtered = [r for r in pool if r["id"] in allowed_recipe_ids]
+        if filtered:
+            pool = filtered
+    if exclude_recipe_ids:
+        filtered = [r for r in pool if r["id"] not in exclude_recipe_ids]
         if filtered:
             pool = filtered
     if require_recipe_name_in is not None:
@@ -284,6 +291,7 @@ def build_day_meals(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dict, 
                      weekly_variety: Optional[Dict[str, Set[int]]] = None,
                      other_meal_rice_tracker: Optional[Dict[str, int]] = None,
                      allowed_recipes_by_category: Optional[Dict[str, Set[int]]] = None,
+                     exclude_recipes_by_category: Optional[Dict[str, Set[int]]] = None,
                      recipe_scale_totals: Optional[Dict[int, float]] = None,
                      rng: Optional[random.Random] = None,
                      ) -> Tuple[List[Dict], Set[int], Set[str]]:
@@ -300,6 +308,8 @@ def build_day_meals(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dict, 
     用來把整週白飯占比逼近 OTHER_MEAL_RICE_RATIO，呼叫端要用同一個 dict 物件跨整週傳入（會被原地修改）。
     allowed_recipes_by_category: {category: {recipe_id,...}}，見 select_recipe_for_slot 的
     allowed_recipe_ids，「產生預覽」確認後才寫入週推薦時用來把每個類別鎖定在使用者核准過的食譜清單。
+    exclude_recipes_by_category: {category: {recipe_id,...}}，見 select_recipe_for_slot 的
+    exclude_recipe_ids，「重新產生候選」時排除本次推薦流程裡這個類別已經展示過的食譜。
     recipe_scale_totals: {recipe_id: 累積份量倍數}，見 _min_scale_for_recipe，呼叫端要用同一個
     dict 物件跨整週傳入（會被原地修改），這樣才能累積整週的份量總和。
     回傳 (meals, today_recipe_ids, today_carb_sources)。"""
@@ -310,6 +320,7 @@ def build_day_meals(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dict, 
     weekly_variety = weekly_variety if weekly_variety is not None else {}
     other_meal_rice_tracker = other_meal_rice_tracker if other_meal_rice_tracker is not None else {}
     allowed_recipes_by_category = allowed_recipes_by_category or {}
+    exclude_recipes_by_category = exclude_recipes_by_category or {}
     recipe_scale_totals = recipe_scale_totals if recipe_scale_totals is not None else {}
     include_soup_meal_types = include_soup_meal_types or set()
     meals: List[Dict] = []
@@ -332,6 +343,7 @@ def build_day_meals(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dict, 
                                                  usage_counter, cost_counter, yesterday_recipe_ids,
                                                  favorite_recipe_ids, weekly_variety=weekly_variety,
                                                  allowed_recipe_ids=allowed_recipes_by_category.get(category),
+                                                 exclude_recipe_ids=exclude_recipes_by_category.get(category),
                                                  recipe_scale_totals=recipe_scale_totals, rng=rng)
             if not recipe:
                 continue
@@ -383,6 +395,7 @@ def build_day_meals(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dict, 
                                                  require_recipe_name_in=require_recipe_name_in,
                                                  require_pairing_style=None if category == "主食" else staple_pairing_style,
                                                  allowed_recipe_ids=allowed_recipes_by_category.get(category),
+                                                 exclude_recipe_ids=exclude_recipes_by_category.get(category),
                                                  recipe_scale_totals=recipe_scale_totals, rng=rng)
             if not recipe:
                 continue
@@ -411,13 +424,15 @@ def generate_week_plan(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dic
                         favorite_recipe_ids: Optional[Set[int]] = None,
                         soup_days_by_meal: Optional[Dict[str, Set[int]]] = None,
                         allowed_recipes_by_category: Optional[Dict[str, Set[int]]] = None,
+                        exclude_recipes_by_category: Optional[Dict[str, Set[int]]] = None,
                         rng: Optional[random.Random] = None) -> List[Dict]:
     """preferred_recipes_by_day: {date: {(meal_type, 'A'|'B'): candidate_dict}}——固定餐點設定可以有
     「執行天數」限制（見 FixedMealPreference），所以每天套用的固定餐點不一定相同，改由呼叫端
     （MealPlanService）依日期算好每天各自的 preferred_recipes 再傳進來，這裡逐天取當天那份。
     soup_days_by_meal: {"lunch": {day_of_week,...}, "dinner": {day_of_week,...}}，見
     build_day_meals 的 include_soup_meal_types，午餐/晚餐各自獨立的湯天設定。
-    allowed_recipes_by_category：見 build_day_meals，整週共用同一份鎖定清單。"""
+    allowed_recipes_by_category：見 build_day_meals，整週共用同一份鎖定清單。
+    exclude_recipes_by_category：見 build_day_meals，整週共用同一份排除清單。"""
     usage_counter: Dict[int, int] = {}
     cost_counter: Dict[str, int] = {}
     yesterday_ids: Set[int] = set()
@@ -437,6 +452,7 @@ def generate_week_plan(candidates: List[Dict], user_a_ctx: Dict, user_b_ctx: Dic
             yesterday_carb_sources=yesterday_carb_sources, include_soup_meal_types=include_soup_meal_types,
             weekly_variety=weekly_variety, other_meal_rice_tracker=other_meal_rice_tracker,
             allowed_recipes_by_category=allowed_recipes_by_category,
+            exclude_recipes_by_category=exclude_recipes_by_category,
             recipe_scale_totals=recipe_scale_totals, rng=rng,
         )
         days.append({"date": d, "meals": meals})

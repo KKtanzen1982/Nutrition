@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watchEffect } from 'vue'
+import { computed, ref, watch, watchEffect } from 'vue'
 import {
   addDish,
   confirmMealPlan,
@@ -21,14 +21,16 @@ import { addExcludedRecipe, fetchExcludedRecipes, removeExcludedRecipe } from '.
 import { addFavoriteRecipe, fetchFavoriteRecipes, removeFavoriteRecipe } from './favorite_recipe_api'
 import { fetchSoupDays, setSoupDays } from './soup_day_preference_api'
 import { fetchPrepPlan } from './prep_plan_api'
+import ManualCandidatesPanel from './ManualCandidatesPanel.vue'
 import { searchRecipesByName } from '../recipes/recipe_api'
+import Modal from '../shared/Modal.vue'
 import { useConfirmDialog } from '../shared/useConfirmDialog'
 import { useHouseholdConfig } from '../shared/useHouseholdConfig'
 import { useLocalStorage } from '../shared/useLocalStorage'
 import { startOfWeekMonday, toISODate, today } from '../shared/date_utils'
 import type {
   DayMeals, ExcludedRecipe, FavoriteRecipe, FixedMealPreference, FixedMealType,
-  MealDetail, MealPlanDetail, MealPlanPreview, MealPlanSummary, MealType, PrepDayMeal, PrepPlan, RecipeSearchResult,
+  MealDetail, MealPlanDetail, MealPlanPreview, MealPlanSummary, MealType, PrepDayMeal, PrepPlan, PreviewRecipe, RecipeSearchResult,
   SharedFixedMealType, SharedMealCategory,
 } from '../shared/types'
 
@@ -252,6 +254,9 @@ const soupDinnerDays = ref<number[]>([])
 const soupError = ref<string | null>(null)
 const showRules = ref(false)
 
+// ---- 「更多設定」：固定餐點／餐點規則與設定／最愛清單收進同一個彈出視窗，避免主頁面一開始就被三個設定區塊占滿 ----
+const showMoreSettings = ref(false)
+
 async function loadSoupDays() {
   soupError.value = null
   try {
@@ -467,24 +472,105 @@ const previewData = ref<MealPlanPreview | null>(null)
 const previewWeekStart = ref('')
 const committingPreview = ref(false)
 const commitPreviewError = ref<string | null>(null)
+const regeneratingCategory = ref<string | null>(null)
 
-async function runPreview(weekStartDate: string) {
+// ---- 步驟2：產生預覽前先寫入預計要用的食材/食譜，強制併入對應類別的候選（見 ManualCandidatesPanel） ----
+const manualCandidates = ref<Record<string, PreviewRecipe[]>>({})
+const showAddMoreCandidates = ref(false)
+function manualCandidatesPayload(): Record<string, number[]> | undefined {
+  const out: Record<string, number[]> = {}
+  for (const [cat, list] of Object.entries(manualCandidates.value)) {
+    if (list.length) out[cat] = list.map((c) => c.recipe_id)
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
+// ---- 本次推薦流程內記住每個類別已經出現過的食譜，重新推薦（整體或單一類別）時排除，
+// 避免「重新產生怎麼推薦都一樣」；離開流程（取消/寫入完成）時重置，見 resetPreviewSession ----
+const previewShownIds = ref<Record<string, Set<number>>>({})
+function resetPreviewSession() {
+  previewShownIds.value = {}
+  manualCandidates.value = {}
+}
+function recordShownIds(data: MealPlanPreview) {
+  const next: Record<string, Set<number>> = { ...previewShownIds.value }
+  for (const cat of data.categories) {
+    const set = new Set(next[cat.category] ?? [])
+    for (const r of cat.recipes) set.add(r.recipe_id)
+    next[cat.category] = set
+  }
+  previewShownIds.value = next
+}
+
+// ---- 預覽已經產生後，使用者還是能繼續用 ManualCandidatesPanel 加入新的候選（不必先取消整份預覽）：
+// 新加入的候選直接就地併入目前畫面上的預覽結果，不必重新呼叫後端；移除候選則不動預覽畫面
+// （移除的可能是演算法自己選到、剛好也被鎖定過的食譜，直接連動移除容易誤刪，交給使用者在預覽列表自己按「移除」）----
+watch(manualCandidates, (newVal, oldVal) => {
+  if (!previewData.value) return
+  const additions: Record<string, PreviewRecipe[]> = {}
+  for (const [cat, list] of Object.entries(newVal)) {
+    const oldIds = new Set((oldVal?.[cat] ?? []).map((c) => c.recipe_id))
+    const added = list.filter((c) => !oldIds.has(c.recipe_id))
+    if (added.length) additions[cat] = added
+  }
+  if (Object.keys(additions).length === 0) return
+
+  const categories = previewData.value.categories.map((cat) => {
+    const toAdd = (additions[cat.category] ?? []).filter((m) => !cat.recipes.some((r) => r.recipe_id === m.recipe_id))
+    return toAdd.length ? { ...cat, recipes: [...cat.recipes, ...toAdd] } : cat
+  })
+  for (const [cat, list] of Object.entries(additions)) {
+    if (!categories.some((c) => c.category === cat)) categories.push({ category: cat, recipes: [...list] })
+  }
+  previewData.value = { categories }
+}, { deep: true })
+
+async function runPreview(weekStartDate: string, options?: { excludeCategory?: string }) {
   if (!userA.value || !userB.value) return
+  const isFreshSession = !previewData.value && !options?.excludeCategory
+  if (isFreshSession) previewShownIds.value = {}
   generating.value = true
+  regeneratingCategory.value = options?.excludeCategory ?? null
   generateError.value = null
   commitPreviewError.value = null
   try {
-    previewData.value = await previewMealPlan({
+    let excludeIds: Record<string, number[]> | undefined
+    if (options?.excludeCategory) {
+      const shown = previewShownIds.value[options.excludeCategory]
+      if (shown?.size) excludeIds = { [options.excludeCategory]: [...shown] }
+    } else if (previewData.value) {
+      const out: Record<string, number[]> = {}
+      for (const [cat, shown] of Object.entries(previewShownIds.value)) {
+        if (shown.size) out[cat] = [...shown]
+      }
+      if (Object.keys(out).length) excludeIds = out
+    }
+
+    const result = await previewMealPlan({
       week_start_date: weekStartDate,
       user_id_a: userA.value.id,
       user_id_b: userB.value.id,
+      manual_candidates: manualCandidatesPayload(),
+      exclude_recipe_ids: excludeIds,
     })
+
+    let finalData = result
+    if (options?.excludeCategory && previewData.value) {
+      // 只重推這個類別：其他類別維持目前畫面上的結果，不被這次整週試跑的其他類別結果覆蓋
+      const updatedCat = result.categories.find((c) => c.category === options.excludeCategory)
+      finalData = {
+        categories: previewData.value.categories.map((c) => (updatedCat && c.category === options.excludeCategory ? updatedCat : c)),
+      }
+    }
+    previewData.value = finalData
+    recordShownIds(finalData)
     previewWeekStart.value = weekStartDate
     showGenerateNewWeek.value = false
   } catch (e) {
     generateError.value = e instanceof Error ? e.message : '產生食譜預覽失敗，請稍後再試'
   } finally {
     generating.value = false
+    regeneratingCategory.value = null
   }
 }
 
@@ -492,9 +578,14 @@ function submitGenerate() {
   runPreview(weekStart.value)
 }
 
+function submitRegenerateCategory(category: string) {
+  runPreview(previewWeekStart.value, { excludeCategory: category })
+}
+
 function cancelPreview() {
   previewData.value = null
   commitPreviewError.value = null
+  resetPreviewSession()
 }
 
 async function submitCommitPreview() {
@@ -515,6 +606,7 @@ async function submitCommitPreview() {
     plan.value = result
     setCurrentMealPlanId(result.id)
     previewData.value = null
+    resetPreviewSession()
     await loadOtherPlans()
   } catch (e) {
     commitPreviewError.value = e instanceof Error ? e.message : '寫入本週推薦失敗，請稍後再試'
@@ -570,14 +662,44 @@ function removePreviewRecipe(category: string, recipeId: number) {
   cat.recipes = cat.recipes.filter((r) => r.recipe_id !== recipeId)
 }
 
-// ---- 整週重新推薦：等同再產生一次同一週的菜單（後端每次產生都是新的一筆，不會覆蓋），
-// 一樣先跑預覽讓你確認/調整食譜，寫入後直接切換過去看新結果 ----
+// ---- 整週重新推薦：跟「產生新的一週」走同一套預覽畫面（換掉/移除/重新推薦這個類別/追加候選/確定寫入），
+// 差別是不必再重新呼叫演算法試跑一次——直接把目前這一週已經在用的食譜當作預覽起點顯示出來，
+// 使用者從這份「上次的資料」開始調整，而不是每次都要重新翻閱一份全新亂數結果。
+// 後端每次「確定寫入」都是新的一筆（不會覆蓋），目前的安排在寫入前都還在。----
 
-async function submitRegenerateWeek() {
-  if (!plan.value || !userA.value || !userB.value) return
-  const ok = await confirmDialog(`確定要整週重新推薦「${plan.value.plan_date} 那一週」嗎？目前的安排（含你手動調整過的部分）不會被覆蓋，但確認預覽後畫面會切換到新產生的版本。`)
-  if (!ok) return
-  await runPreview(plan.value.plan_date)
+function recipesFromPlan(planDetail: MealPlanDetail): MealPlanPreview {
+  const PREVIEW_CATEGORY_ORDER = ['主食', '肉', '菜', '湯', '早餐', '下午茶']
+  const seen: Record<string, Map<number, string>> = {}
+  for (const day of planDetail.days) {
+    for (const meal of day.meals) {
+      const cat = meal.recipe_category ?? '其他'
+      const byId = seen[cat] ?? new Map<number, string>()
+      byId.set(meal.recipe_id, meal.recipe_name)
+      seen[cat] = byId
+    }
+  }
+  const categories = [...PREVIEW_CATEGORY_ORDER, ...Object.keys(seen).filter((c) => !PREVIEW_CATEGORY_ORDER.includes(c))]
+    .filter((cat) => seen[cat]?.size)
+    .map((cat) => ({
+      category: cat,
+      recipes: [...seen[cat]!.entries()]
+        .map(([recipe_id, recipe_name]) => ({ recipe_id, recipe_name }))
+        .sort((a, b) => a.recipe_name.localeCompare(b.recipe_name, 'zh-Hant')),
+    }))
+  return { categories }
+}
+
+function submitRegenerateWeek() {
+  if (!plan.value) return
+  resetPreviewSession()
+  const data = recipesFromPlan(plan.value)
+  weekStart.value = plan.value.plan_date
+  previewWeekStart.value = plan.value.plan_date
+  previewData.value = data
+  recordShownIds(data)
+  generateError.value = null
+  commitPreviewError.value = null
+  showGenerateNewWeek.value = false
 }
 
 // ---- 查看其他週：後端每次「產生」都會留下一筆新紀錄，這裡列出兩人名下所有週菜單讓你切換查看 ----
@@ -1046,6 +1168,18 @@ function toggleDiffExpanded(date: string) {
     </div>
 
     <template v-else>
+      <div class="flex justify-end">
+        <button
+          type="button"
+          class="rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold text-ink hover:bg-bg"
+          @click="showMoreSettings = true"
+        >
+          更多設定 ▸
+        </button>
+      </div>
+
+      <Modal v-model="showMoreSettings" title="更多設定">
+        <div class="space-y-4">
       <section class="rounded-2xl border border-ink/10 bg-surface p-4">
         <button type="button" class="flex w-full items-center justify-between text-left" @click="showFixedMeals = !showFixedMeals">
           <span class="font-serif text-lg text-ink">固定餐點</span>
@@ -1387,6 +1521,8 @@ function toggleDiffExpanded(date: string) {
           </div>
         </div>
       </section>
+        </div>
+      </Modal>
 
       <div v-if="!plan && !loadingPlan && !previewData" class="mt-4 rounded-2xl border border-ink/10 bg-surface p-6">
         <div class="flex items-center gap-1.5">
@@ -1401,6 +1537,9 @@ function toggleDiffExpanded(date: string) {
         <div class="mt-4">
           <label class="mb-1 block text-xs text-tea">週一日期</label>
           <input v-model="weekStart" type="date" class="rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
+        </div>
+        <div class="mt-4">
+          <ManualCandidatesPanel v-model="manualCandidates" />
         </div>
         <p v-if="generateError" class="mt-3 rounded-lg bg-alert/10 px-3 py-2 text-sm text-alert">{{ generateError }}</p>
         <button
@@ -1428,7 +1567,7 @@ function toggleDiffExpanded(date: string) {
               :disabled="generating"
               @click="runPreview(previewWeekStart)"
             >
-              {{ generating ? '重新產生中…' : '重新產生候選' }}
+              {{ generating && !regeneratingCategory ? '重新產生中…' : '重新產生候選' }}
             </button>
             <button type="button" class="rounded-full border border-ink/15 px-3 py-1.5 text-xs font-semibold text-tea hover:bg-bg" @click="cancelPreview">
               取消
@@ -1439,9 +1578,30 @@ function toggleDiffExpanded(date: string) {
         <p v-if="generateError" class="mt-3 rounded-lg bg-alert/10 px-3 py-2 text-xs text-alert">{{ generateError }}</p>
         <p v-if="commitPreviewError" class="mt-3 rounded-lg bg-alert/10 px-3 py-2 text-xs text-alert">{{ commitPreviewError }}</p>
 
+        <button
+          type="button"
+          class="mt-3 text-xs font-semibold text-accent hover:text-accent-bright"
+          @click="showAddMoreCandidates = !showAddMoreCandidates"
+        >
+          {{ showAddMoreCandidates ? '收合追加候選 ▴' : '+ 追加預計要用的食材或食譜 ▾' }}
+        </button>
+        <div v-if="showAddMoreCandidates" class="mt-2">
+          <ManualCandidatesPanel v-model="manualCandidates" />
+        </div>
+
         <div class="mt-3 grid gap-3 sm:grid-cols-2">
           <div v-for="cat in previewData.categories" :key="cat.category" class="rounded-xl border border-ink/10 bg-surface p-3">
-            <p class="text-sm font-semibold text-ink">{{ cat.category }}</p>
+            <div class="flex items-center justify-between">
+              <p class="text-sm font-semibold text-ink">{{ cat.category }}</p>
+              <button
+                type="button"
+                class="text-xs font-semibold text-accent hover:text-accent-bright disabled:opacity-50"
+                :disabled="generating"
+                @click="submitRegenerateCategory(cat.category)"
+              >
+                {{ regeneratingCategory === cat.category ? '重推中…' : '重新推薦這個類別' }}
+              </button>
+            </div>
             <ul v-if="cat.recipes.length" class="mt-2 divide-y divide-ink/10">
               <li v-for="r in cat.recipes" :key="r.recipe_id" class="flex items-center justify-between py-1.5 text-sm">
                 <span class="min-w-0 flex-1 truncate text-ink">{{ r.recipe_name }}</span>
@@ -1567,13 +1727,16 @@ function toggleDiffExpanded(date: string) {
               </button>
               <div
                 v-if="showGenerateNewWeek"
-                class="absolute left-0 top-full z-20 mt-1 w-64 rounded-xl border border-ink/10 bg-surface p-3 shadow-lg"
+                class="absolute left-0 top-full z-20 mt-1 w-96 max-h-[80vh] overflow-y-auto rounded-xl border border-ink/10 bg-surface p-3 shadow-lg"
               >
                 <div class="flex items-center justify-between">
                   <p class="text-xs text-ink">選一個週一日期產生新的一週</p>
                   <button type="button" class="text-xs text-tea hover:text-ink" @click="closeGenerateNewWeek">關閉</button>
                 </div>
                 <input v-model="weekStart" type="date" class="mt-2 w-full rounded-lg border border-ink/15 bg-bg px-3 py-2 text-sm text-ink" />
+                <div class="mt-2">
+                  <ManualCandidatesPanel v-model="manualCandidates" />
+                </div>
                 <p v-if="generateError" class="mt-2 rounded-lg bg-alert/10 px-3 py-2 text-xs text-alert">{{ generateError }}</p>
                 <button
                   type="button"

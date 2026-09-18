@@ -7,6 +7,13 @@ class PreviewMealPlanRequest(BaseModel):
     user_id_a: int
     user_id_b: int
     week_start_date: date
+    manual_candidates: Optional[Dict[str, List[int]]] = Field(
+        None, description="產生預覽前使用者手動指定要考慮的食譜（依類別分組），會強制併入該類別的候選清單"
+    )
+    exclude_recipe_ids: Optional[Dict[str, List[int]]] = Field(
+        None, description="重新產生候選時排除的食譜（依類別分組，通常是本次推薦流程裡這個類別已經出現過的食譜），"
+                           "避免重推時又選到一樣的"
+    )
 
 
 class GenerateMealPlanRequest(BaseModel):

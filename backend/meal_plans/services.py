@@ -441,13 +441,23 @@ class MealPlanService:
         soup_days_by_meal = soup_day_preference_service.soup_days_by_meal(db)
         return ctx_a, ctx_b, candidates, preferred_recipes_by_day, favorite_ids, soup_days_by_meal
 
-    def preview_plan(self, db: Session, user_id_a: int, user_id_b: int, week_start_date) -> Dict:
+    def preview_plan(self, db: Session, user_id_a: int, user_id_b: int, week_start_date,
+                      manual_candidates: Optional[Dict[str, List[int]]] = None,
+                      exclude_recipe_ids: Optional[Dict[str, List[int]]] = None) -> Dict:
         """先照規則式演算法跑一次完整的一週選餐（不寫入 DB），把實際會用到的食譜依類別去重列出來，
-        供使用者在真正寫入週推薦之前先換掉不想要的食譜（見 generate_plan 的 locked_recipes）。"""
+        供使用者在真正寫入週推薦之前先換掉不想要的食譜（見 generate_plan 的 locked_recipes）。
+        manual_candidates：使用者在產生預覽前手動指定要考慮的食譜（依食材/食譜名稱搜尋後選的），
+        跑完演算法後強制併入對應類別的清單，即使演算法這次試跑沒選到它們。
+        exclude_recipe_ids：「重新產生候選」時排除的食譜（通常是本次推薦流程裡這個類別已經出現過的），
+        讓重推真的會換一批，不會一直選到同樣的。"""
         ctx_a, ctx_b, candidates, preferred_recipes_by_day, favorite_ids, soup_days_by_meal = self._week_plan_inputs(
             db, user_id_a, user_id_b, week_start_date)
+        exclude_recipes_by_category = (
+            {cat: set(ids) for cat, ids in exclude_recipe_ids.items() if ids} if exclude_recipe_ids else None
+        )
         days = generate_week_plan(candidates, ctx_a, ctx_b, week_start_date, preferred_recipes_by_day=preferred_recipes_by_day,
-                                   favorite_recipe_ids=favorite_ids, soup_days_by_meal=soup_days_by_meal)
+                                   favorite_recipe_ids=favorite_ids, soup_days_by_meal=soup_days_by_meal,
+                                   exclude_recipes_by_category=exclude_recipes_by_category)
 
         category_order = ["主食", "肉", "菜", "湯", "早餐", "下午茶"]
         seen: Dict[str, Dict[int, str]] = {cat: {} for cat in category_order}
@@ -455,6 +465,15 @@ class MealPlanService:
             for meal in day["meals"]:
                 cat = meal["category"]
                 seen.setdefault(cat, {})[meal["recipe_id"]] = meal["recipe_name"]
+
+        if manual_candidates:
+            name_by_id = {c["id"]: c["recipe_name"] for c in candidates}
+            for cat, recipe_ids in manual_candidates.items():
+                for rid in recipe_ids:
+                    name = name_by_id.get(rid)
+                    if name is None:
+                        continue  # 不在目前候選池（例如過敏/飲食限制排除），略過
+                    seen.setdefault(cat, {})[rid] = name
 
         categories = [
             {"category": cat, "recipes": [{"recipe_id": rid, "recipe_name": name} for rid, name in sorted(recipes.items(), key=lambda kv: kv[1])]}

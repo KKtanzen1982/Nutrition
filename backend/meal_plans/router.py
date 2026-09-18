@@ -131,7 +131,10 @@ def preview_meal_plan(payload: PreviewMealPlanRequest, db: Session = Depends(get
     """先照規則式演算法跑一次完整選餐，回傳實際會用到的食譜（依類別去重列出），不寫入 DB。
     使用者可以在這份清單裡把不想要的食譜換掉，再呼叫 /meal-plans/generate 帶上 locked_recipes 正式寫入。"""
     try:
-        return meal_plan_service.preview_plan(db, payload.user_id_a, payload.user_id_b, payload.week_start_date)
+        return meal_plan_service.preview_plan(
+            db, payload.user_id_a, payload.user_id_b, payload.week_start_date,
+            manual_candidates=payload.manual_candidates, exclude_recipe_ids=payload.exclude_recipe_ids,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -417,6 +417,8 @@ export interface PreviewMealPlanPayload {
   week_start_date: string
   user_id_a: number
   user_id_b: number
+  manual_candidates?: Record<string, number[]> | null
+  exclude_recipe_ids?: Record<string, number[]> | null
 }
 
 export interface PreviewRecipe {

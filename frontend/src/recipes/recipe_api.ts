@@ -15,6 +15,10 @@ export function searchRecipesByName(query: string, category?: string): Promise<R
   return apiGet<RecipeSearchResult[]>('/recipes/search', { query, search_by: 'name', category })
 }
 
+export function searchRecipesByIngredient(query: string, category?: string): Promise<RecipeSearchResult[]> {
+  return apiGet<RecipeSearchResult[]>('/recipes/search', { query, search_by: 'ingredient', category })
+}
+
 export function listRecipes(
   category: string | undefined,
   costLevel: string | undefined,
