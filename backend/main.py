@@ -53,6 +53,13 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+# ApiKeyMiddleware 加在 CORSMiddleware 之前註冊，讓 CORSMiddleware 是最外層：Starlette 的
+# add_middleware 是後加的在外層，早加的在內層。ApiKeyMiddleware 擋下未授權請求時是直接回傳
+# JSONResponse、不會呼叫 call_next() 往內層走，如果 CORSMiddleware 在內層，這個 401 回應就不會
+# 經過它加上 CORS header，瀏覽器端會直接判定成 CORS 失敗（fetch 丟出 TypeError: Failed to fetch，
+# 前端拿不到 401 這個狀態碼，也就沒辦法正常跳出「密碼錯誤」）。CORSMiddleware 放最外層才能保證
+# 包含這個早期回傳的 401 在內，所有回應都會補上 CORS header。
+app.add_middleware(ApiKeyMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -60,7 +67,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(ApiKeyMiddleware)
 
 for r in (users_router, fitness_router, training_router, recipes_router, meal_plans_router, shopping_router, backup_router):
     app.include_router(r, prefix="/api")
