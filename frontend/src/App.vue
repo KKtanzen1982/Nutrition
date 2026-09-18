@@ -2,6 +2,7 @@
 import { useRoute } from 'vue-router'
 import UserSwitcher from './shared/UserSwitcher.vue'
 import ConfirmDialog from './shared/ConfirmDialog.vue'
+import AccessGate from './shared/AccessGate.vue'
 
 const route = useRoute()
 
@@ -22,27 +23,29 @@ const navLinks = [
 </script>
 
 <template>
-  <div class="min-h-screen bg-bg text-ink">
-    <nav class="border-b border-ink/10 bg-surface">
-      <div class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3">
-        <span class="font-serif text-lg">飲食管理</span>
-        <div class="flex flex-wrap gap-1">
-          <RouterLink
-            v-for="link in navLinks"
-            :key="link.path"
-            :to="link.path"
-            class="px-3 py-1.5 text-sm font-semibold uppercase tracking-wide"
-            :class="route.path === link.path ? 'border-b-2 border-accent text-ink' : 'text-tea hover:text-ink'"
-          >
-            {{ link.label }}
-          </RouterLink>
+  <AccessGate>
+    <div class="min-h-screen bg-bg text-ink">
+      <nav class="border-b border-ink/10 bg-surface">
+        <div class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3">
+          <span class="font-serif text-lg">飲食管理</span>
+          <div class="flex flex-wrap gap-1">
+            <RouterLink
+              v-for="link in navLinks"
+              :key="link.path"
+              :to="link.path"
+              class="px-3 py-1.5 text-sm font-semibold uppercase tracking-wide"
+              :class="route.path === link.path ? 'border-b-2 border-accent text-ink' : 'text-tea hover:text-ink'"
+            >
+              {{ link.label }}
+            </RouterLink>
+          </div>
         </div>
+      </nav>
+      <div class="mx-auto max-w-5xl px-4 pt-4">
+        <UserSwitcher />
       </div>
-    </nav>
-    <div class="mx-auto max-w-5xl px-4 pt-4">
-      <UserSwitcher />
+      <RouterView />
+      <ConfirmDialog />
     </div>
-    <RouterView />
-    <ConfirmDialog />
-  </div>
+  </AccessGate>
 </template>

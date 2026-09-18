@@ -57,7 +57,8 @@ npm run dev
 
 - **後端**：部署到 Railway，連 GitHub repo 後自動建置（`backend/Procfile`），在 Railway 後台設定環境變數 `DATABASE_URL`（Root Directory 設成 `backend`）
 - **前端**：部署到 GitHub Pages，由 `.github/workflows/deploy-pages.yml` 在 push 到 `master` 時自動建置部署，網址是 `https://kktanzen1982.github.io/Nutrition/`
-- 前端建置時需要知道後端網址：在 repo 的 Settings → Secrets and variables → Actions → Variables 設定 `VITE_API_BASE_URL`，值是 Railway 後端網址加上 `/api`（例如 `https://xxx.up.railway.app/api`）
+- 前端建置時需要知道後端網址：在 repo 的 Settings → Secrets and variables → Actions → Variables 設定 `VITE_API_BASE_URL`，值是後端網址加上 `/api`（例如 `https://xxx.up.railway.app/api` 或 `https://xxx.onrender.com/api`）
+- 後端網址是公開的，`/api` 底下預設沒有任何驗證，誰知道網址就能讀寫所有資料。務必在後端環境變數設定 `APP_ACCESS_KEY`（自己取一組密碼），前端第一次連線會跳出密碼輸入畫面（見 `frontend/src/shared/AccessGate.vue`），輸入正確後存在瀏覽器 localStorage，之後不用每次都輸入。不設這個環境變數等於不驗證。
 
 設定一次之後，之後改程式碼 push 到 GitHub，前後端都會自動重新部署。
 

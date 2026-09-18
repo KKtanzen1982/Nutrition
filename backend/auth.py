@@ -1,16 +1,20 @@
 """簡易 API Key 驗證 - 保護 /api 和 /mcp
 ================================================
 
-給 Claude.ai 的 MCP connector 用。只保護 /mcp 這個掛載點本身（開啟 MCP session、列工具、呼叫工具），
-不動 /api 底下原本給前端用的端點——前端目前完全沒有登入機制，若連 /api 一起擋，現有網頁會直接打不通。
-這代表 /api 本身的資料仍然是誰都能讀寫，這是既有風險，不在這次「保護 MCP 對外窗口」的範圍內。
+兩把獨立的鑰匙，各自保護不同的對外窗口，互不影響：
 
-本機開發沒設 MCP_API_KEY 環境變數時直接放行；正式環境（Railway）要暴露給 Claude.ai 前務必設定，
-不設等於 /mcp 完全不驗證。
+- `/mcp`：給 Claude.ai 的 MCP connector 用，鑰匙是 MCP_API_KEY，驗證 `Authorization: Bearer <key>`。
+- `/api`：給前端網頁用，鑰匙是 APP_ACCESS_KEY，驗證 `X-App-Key: <key>` 這個自訂 header。
+  前端（frontend/src/shared/AccessGate.vue + http.ts）第一次進站會跳密碼輸入畫面，輸入正確後
+  存進 localStorage，之後每次 API 請求都帶上這個 header。
 
-Claude.ai 端連線設定裡帶 `Authorization: Bearer <MCP_API_KEY>`，fastapi-mcp 收到工具呼叫時會把
-這個 header 轉發進它打回 /api 的內部請求，但 /api 本身不檢查，所以轉不轉發其實不影響驗證結果，
-真正把關的只有這支 middleware。
+本機開發兩個環境變數都不設時直接放行（方便本機開發/mock db 不用先設密碼）；正式環境
+（Render/Railway）要暴露在公開網址上，務必至少設定 APP_ACCESS_KEY，不設等於 /api 完全不驗證、
+誰都能讀寫所有資料。
+
+CORS 前置的 OPTIONS 預檢請求一律放行不檢查——瀏覽器送 preflight 時不會帶自訂 header，
+如果在這裡連 OPTIONS 都擋，會導致所有跨網域請求（GitHub Pages 前端 → Render 後端）直接失敗，
+連帶把整個網站打不通。
 """
 
 import os
@@ -19,13 +23,23 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-PROTECTED_PREFIXES = ("/mcp",)
+PROTECTED = (
+    ("/mcp", "MCP_API_KEY", "authorization", lambda key: f"Bearer {key}"),
+    ("/api", "APP_ACCESS_KEY", "x-app-key", lambda key: key),
+)
 
 
 class ApiKeyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        api_key = os.getenv("MCP_API_KEY")
-        if api_key and request.url.path.startswith(PROTECTED_PREFIXES):
-            if request.headers.get("authorization") != f"Bearer {api_key}":
-                return JSONResponse(status_code=401, content={"detail": "未授權：缺少或錯誤的 API key"})
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
+        path = request.url.path
+        for prefix, env_name, header_name, expected in PROTECTED:
+            if not path.startswith(prefix):
+                continue
+            api_key = os.getenv(env_name)
+            if api_key and request.headers.get(header_name) != expected(api_key):
+                return JSONResponse(status_code=401, content={"detail": "未授權：缺少或錯誤的存取密碼"})
+            break
         return await call_next(request)

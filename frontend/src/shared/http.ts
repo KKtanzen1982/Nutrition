@@ -1,3 +1,5 @@
+import { clearAccessKey, getAccessKey } from './accessKey'
+
 const DEFAULT_BASE_URL = 'http://localhost:8000/api'
 
 export function getBaseUrl(): string {
@@ -15,10 +17,22 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const accessKey = getAccessKey()
   const res = await fetch(`${getBaseUrl()}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(accessKey ? { 'X-App-Key': accessKey } : {}),
+      ...(init?.headers ?? {}),
+    },
     ...init,
   })
+
+  if (res.status === 401) {
+    // 存的密碼已經失效（後端換了 APP_ACCESS_KEY，或本來就沒存對）：清掉重新整理，讓 AccessGate 重新跳出來
+    clearAccessKey()
+    window.location.reload()
+    throw new ApiError(401, '存取密碼已失效，請重新輸入')
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => '')
