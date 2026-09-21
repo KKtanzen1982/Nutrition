@@ -756,7 +756,10 @@ class MealPlanService:
 
     def rebalance_day(self, db: Session, plan_id: int, meal_date) -> Dict:
         """重新依當天熱量目標分配份量：每個使用者、每一餐，把該餐目前有的菜平均分配熱量佔比並重新
-        scale_recipe，不改變菜色組成，只調整份量。用在「新增/移除某一餐的菜之後，其他菜份量需要跟著調整」。"""
+        scale_recipe，不改變菜色組成，只調整份量。用在「新增/移除某一餐的菜之後，其他菜份量需要跟著調整」。
+        某一餐被整個刪光時（例如下午茶整份移除），該餐原本佔的熱量比例（MEAL_SHARES）要按比例分給
+        當天還有菜的其他餐，而不是整份消失——否則一整天的熱量總和會卡在剩餘幾餐的佔比總和（例如少了
+        下午茶的 10% 就卡在目標的 90%），不管重算幾次都補不回來。"""
         plan = db.get(WeeklyMealPlan, plan_id)
         if not plan:
             raise ValueError("計畫不存在")
@@ -768,11 +771,18 @@ class MealPlanService:
 
         for uid in (plan.user_id_a, plan.user_id_b):
             ctx = nutrition_target_service.get_user_context(db, uid, meal_date)
+            rows_by_type = {
+                meal_type: [m for m in all_meals if m.assigned_user_id == uid and m.meal_type == meal_type]
+                for meal_type in MEAL_SHARES
+            }
+            present_share_total = sum(share for meal_type, share in MEAL_SHARES.items() if rows_by_type[meal_type])
+            if present_share_total <= 0:
+                continue
             for meal_type, share in MEAL_SHARES.items():
-                rows = [m for m in all_meals if m.assigned_user_id == uid and m.meal_type == meal_type]
+                rows = rows_by_type[meal_type]
                 if not rows:
                     continue
-                target_per_dish = ctx["daily_calories_target"] * share / len(rows)
+                target_per_dish = ctx["daily_calories_target"] * (share / present_share_total) / len(rows)
                 for m in rows:
                     recipe = db.get(Recipe, m.recipe_id)
                     if not recipe:
